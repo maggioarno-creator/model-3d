@@ -143,6 +143,16 @@
     <label for="gamma">Gamma <span class="val" id="gav">1.00</span></label>
     <input type="range" id="gamma" min="0.5" max="2.2" step="0.05" value="1" />
 
+    <label for="esc">Échelle d'export <span class="val" id="escv">×4</span></label>
+    <select id="esc">
+      <option value="1">×1 (pixels bruts)</option>
+      <option value="2">×2</option>
+      <option value="3">×3</option>
+      <option value="4" selected>×4 (recommandé)</option>
+      <option value="6">×6</option>
+      <option value="8">×8</option>
+    </select>
+
     <div class="rowbtn">
       <button id="loadPreset" class="ghost">Charger…</button>
       <button id="savePreset" class="ghost">Enregistrer…</button>
@@ -209,6 +219,10 @@ const loopBtn = document.getElementById('loopBtn');
 const seek = document.getElementById('seek'), timeEl = document.getElementById('time');
 const recIndicator = document.getElementById('recIndicator');
 const dl = document.getElementById('dl');
+const escSel = document.getElementById('esc');
+escSel.addEventListener('change', () => {
+  document.getElementById('escv').textContent = '×' + escSel.value;
+});
 
 let looping = true;
 
@@ -289,6 +303,9 @@ const SPOTS = {
 /* ---------- traitement ---------- */
 const buf = document.createElement('canvas');
 const bctx = buf.getContext('2d', { willReadFrequently: true });
+/* canvas d'export : même image, agrandie en pixels nets pour une vidéo de qualité */
+const expCv = document.createElement('canvas');
+const ectx = expCv.getContext('2d');
 
 /* table de quantiles du spot (64x64) : couverture moyenne neutre, pour chaque forme */
 let spotSorted = null, shapeCache = '';
@@ -366,6 +383,14 @@ function process() {
   }
   bctx.putImageData(img, 0, 0);
   ctx.drawImage(buf, 0, 0);
+
+  const esc = parseInt(escSel.value, 10) || 4;
+  if (expCv.width !== sw * esc || expCv.height !== sh * esc) {
+    expCv.width = sw * esc; expCv.height = sh * esc;
+  }
+  ectx.imageSmoothingEnabled = false;
+  ectx.imageSmoothingQuality = 'low';
+  ectx.drawImage(buf, 0, 0, expCv.width, expCv.height);
 }
 function lumOf(c) { return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; }
 function paint(d, j, c) { const i0 = j * 4; d[i0] = c[0]; d[i0+1] = c[1]; d[i0+2] = c[2]; d[i0+3] = 255; }
@@ -439,10 +464,11 @@ function startRecording(mime){
   if (recorder && recorder.state !== 'inactive') return;
   exportExt = mime.indexOf('mp4') !== -1 ? 'mp4' : 'webm';
   ensureAudio();
-  const stream = out.captureStream(30);
+  const stream = expCv.captureStream(30);
   if (audioDest) audioDest.stream.getAudioTracks().forEach(t => stream.addTrack(t));
   chunks = [];
-  recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 6000000 });
+  const bits = Math.min(24000000, Math.max(6000000, expCv.width * expCv.height * 11));
+  recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: bits });
   recorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
   recorder.onstop = () => {
     if (dl.href.startsWith('blob:')) URL.revokeObjectURL(dl.href);
@@ -473,10 +499,10 @@ function stopRecording(){
 
 /* ---------- export PNG ---------- */
 pngBtn.addEventListener('click', () => {
-  out.toBlob(b => {
+  expCv.toBlob(b => {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(b);
-    a.download = 'image-bitmap.png';
+    a.download = 'image-bitmap@x' + escSel.value + '.png';
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   });
