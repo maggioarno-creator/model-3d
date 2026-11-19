@@ -70,7 +70,12 @@
     </div>
 
     <button id="play2" disabled>Lecture / Pause</button>
-    <button id="rec" disabled>Enregistrer (.webm)</button>
+    <label for="fmt">Format d'export</label>
+    <select id="fmt">
+      <option value="mp4" selected>MP4 (H.264)</option>
+      <option value="webm">WebM (VP9)</option>
+    </select>
+    <button id="rec" disabled>Enregistrer la vidéo</button>
     <div class="rowbtn">
       <button id="png" class="ghost" disabled>Image PNG</button>
       <button id="loopBtn" class="ghost">Boucle : ✅</button>
@@ -150,6 +155,8 @@
   <h2>Équivalent ffmpeg (conversion en lot)</h2>
   <pre>ffmpeg -i entree.mp4 -vf "scale=256:-1:flags=lanczos,palettegen=max_colors=2" palette.png
 ffmpeg -i entree.mp4 -i palette.png -lavfi "scale=256:-1:flags=lanczos[s];[s][1:v]paletteuse=dither=bayer:bayer_scale=5,format=yuv420p" -c:v libx264 -crf 18 sortie.mp4</pre>
+  <p>Si votre navigateur n'exporte qu'en WebM, conversion en MP4 en une commande :</p>
+  <pre>ffmpeg -i video-bitmap.webm -c:v libx264 -crf 18 -pix_fmt yuv420p video-bitmap.mp4</pre>
   <p>Première passe : palette de 2 couleurs extraite de la vidéo. Seconde passe : réduction, puis tramage
      de Bayer appliqué avec cette palette. Retire <span style="color:var(--violet)">palettegen</span> et
      <span style="color:var(--violet)">paletteuse</span> au profit d'un simple <span style="color:var(--violet)">format=gray</span>
@@ -378,10 +385,35 @@ function updateTime(){
     timeEl.textContent = fmt(video.currentTime) + ' / ' + fmt(video.duration);
   }
 }
-video.addEventListener('ended', () => { if (recorder && recorder.state === 'recording') stopRecording(); });
+video.addEventListener('ended', () => {
+  if (recorder && recorder.state === 'recording') {
+    recorder.requestData();
+    recorder.stop();
+    video.play().catch(()=>{});
+  }
+});
 
 /* ---------- enregistrement ---------- */
 let recorder = null, chunks = [], audioCtx = null, audioDest = null, audioSrc = null;
+let exportExt = 'webm';
+function supportedFormat(pick){
+  if (!window.MediaRecorder) return null;
+  const CANDIDATES = {
+    mp4:   ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4;codecs=avc1', 'video/mp4'],
+    webm:  ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']
+  };
+  for (const m of CANDIDATES[pick]) if (MediaRecorder.isTypeSupported(m)) return m;
+  return null;
+}
+(function adaptFormatList(){
+  const fmtSel = document.getElementById('fmt');
+  if (!supportedFormat('mp4')) {
+    fmtSel.value = 'webm';
+    const opt = fmtSel.options[0];
+    opt.disabled = true;
+    opt.textContent = 'MP4 (non supporté ici — faire WebM)';
+  }
+})();
 function ensureAudio(){
   if (audioSrc) return;
   try {
@@ -392,14 +424,20 @@ function ensureAudio(){
   } catch (e) { audioDest = null; }
 }
 recBtn.addEventListener('click', () => {
-  if (!rec) {
-    const mime = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']
-      .find(m => window.MediaRecorder && MediaRecorder.isTypeSupported(m));
-    if (!mime) { dl.textContent = 'Enregistrement non supporté par ce navigateur.'; dl.style.display='inline-block'; return; }
-    startRecording(mime);
-  } else stopRecording();
+  if (recorder && recorder.state !== 'inactive') { stopRecording(); return; }
+  const wanted = document.getElementById('fmt').value;
+  let mime = supportedFormat(wanted);
+  if (!mime) { mime = supportedFormat('webm'); }
+  if (!mime) {
+    dl.textContent = 'Enregistrement non supporté par ce navigateur.';
+    dl.style.display = 'inline-block';
+    return;
+  }
+  startRecording(mime);
 });
 function startRecording(mime){
+  if (recorder && recorder.state !== 'inactive') return;
+  exportExt = mime.indexOf('mp4') !== -1 ? 'mp4' : 'webm';
   ensureAudio();
   const stream = out.captureStream(30);
   if (audioDest) audioDest.stream.getAudioTracks().forEach(t => stream.addTrack(t));
@@ -407,9 +445,14 @@ function startRecording(mime){
   recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 6000000 });
   recorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
   recorder.onstop = () => {
-    dl.href = URL.createObjectURL(new Blob(chunks, { type: 'video/webm' }));
+    if (dl.href.startsWith('blob:')) URL.revokeObjectURL(dl.href);
+    dl.href = URL.createObjectURL(new Blob(chunks, { type: mime }));
+    dl.download = 'video-bitmap.' + exportExt;
+    dl.textContent = 'Télécharger la vidéo (.' + exportExt + ')';
     dl.style.display = 'inline-block';
+    dl.click();
     recIndicator.classList.remove('on');
+    recBtn.textContent = 'Enregistrer la vidéo';
   };
   video.pause();
   video.loop = false;
@@ -420,9 +463,10 @@ function startRecording(mime){
   video.play();
 }
 function stopRecording(){
-  if (recorder && recorder.state !== 'inactive') recorder.stop();
-  recorder = null;
-  recBtn.textContent = 'Enregistrer (.webm)';
+  if (recorder && recorder.state !== 'inactive') {
+    recorder.stop();
+    recorder = null;
+  }
   video.loop = looping;
   if (video.src && video.paused) video.play();
 }
