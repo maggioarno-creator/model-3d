@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vidéo → Bitmap (mode Photoshop)</title>
+<style>
+  :root{
+    --bg:#e8e8e8; --panel:#d6d3cf; --ink:#1a1a1a;
+    --bevel-out: 2px outset #fff;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font:13px/1.45 "Segoe UI", Tahoma, Arial, sans-serif;
+    padding:16px;
+  }
+  h1{font-size:16px; margin:0 0 4px}
+  .sub{color:#555; margin:0 0 14px}
+
+  .layout{display:flex; flex-wrap:wrap; gap:14px; align-items:flex-start}
+  .viewer{flex:1 1 520px; min-width:320px}
+  .panel{flex:0 0 300px}
+
+  canvas{
+    display:block; width:100%; height:auto; background:#fff;
+    border:1px solid #999; box-shadow:0 1px 4px rgba(0,0,0,.25);
+    image-rendering:pixelated;
+  }
+  video{display:none}
+
+  /* ---- fenêtres style Photoshop ---- */
+  .dialog{
+    border:2px outset #fff; background:var(--panel);
+    padding:10px 12px 12px; margin:0 0 12px;
+    box-shadow:2px 2px 6px rgba(0,0,0,.3);
+  }
+  .dialog>legend{
+    font-weight:bold; padding:1px 8px; background:var(--panel);
+    border:2px outset #fff;
+  }
+  .row{display:flex; align-items:center; gap:6px; margin:7px 0}
+  .row label{min-width:70px}
+  .row .unit{color:#444}
+  input[type=number]{
+    width:70px; padding:2px 4px; border:2px inset #fff; background:#fff;
+    font:inherit;
+  }
+  input[readonly]{background:var(--bg); color:#555}
+  select{
+    padding:2px 4px; border:2px inset #fff; background:#fff; font:inherit;
+    width:130px;
+  }
+  .sep{height:1px; background:#fff; border-bottom:1px solid #aaa; margin:9px 0}
+
+  button{
+    font:inherit; padding:3px 12px; border:2px outset #fff;
+    background:var(--panel); cursor:pointer; color:var(--ink);
+  }
+  button:active{border-style:inset}
+  button:disabled{color:#888; cursor:default}
+  button.primary{font-weight:bold}
+
+  .controls{display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:10px}
+  .controls input[type=range]{flex:1 1 160px}
+  .time{font-variant-numeric:tabular-nums; min-width:86px; text-align:center}
+  .rec{color:#c00; font-weight:bold; display:none}
+  .rec.on{display:inline}
+  .note{color:#666; font-size:12px; margin-top:8px}
+  .hidden{display:none}
+  #file{display:none}
+  .drop{
+    border:2px dashed #999; padding:22px; text-align:center; cursor:pointer;
+    background:#f4f4f2; margin-bottom:14px;
+  }
+  .drop.over{background:#dfe9df; border-color:#5a5}
+</style>
+</head>
+<body>
+<h1>Vidéo → Bitmap (mode Photoshop)</h1>
+<p class="sub">Convertit une vidéo en vidéo 1-bit (noir &amp; blanc pur) avec les mêmes paramètres que
+<strong>Image &gt; Mode &gt; Bitmap…</strong> de Photoshop : 50&nbsp;% Seuil, Motif géométrique, Diffusion et
+Trame de demi-teintes (linéature, angle, forme du point).</p>
+
+<div class="drop" id="drop">📁 Cliquez ici ou déposez un fichier vidéo (mp4, webm, mov…)</div>
+<input type="file" id="file" accept="video/*">
+
+<div class="layout" id="app" style="display:none">
+  <div class="viewer">
+    <canvas id="out" width="640" height="360"></canvas>
+    <div class="controls">
+      <button id="play" class="primary">▶ Lecture</button>
+      <input type="range" id="seek" value="0" min="0" max="1000">
+      <span class="time" id="time">0:00 / 0:00</span>
+      <span class="rec" id="rec">● REC</span>
+    </div>
+    <div class="controls">
+      <button id="export">Exporter la vidéo (WebM)…</button>
+      <button id="png">Image PNG</button>
+      <label><input type="checkbox" id="loop" checked> Boucle</label>
+    </div>
+    <p class="note" id="dimnote"></p>
+  </div>
+
+  <div class="panel">
+    <!-- ====== Fenêtre 1 : Bitmap ====== -->
+    <fieldset class="dialog">
+      <legend>Bitmap</legend>
+      <div style="font-weight:bold">Résolution</div>
+      <div class="row"><label for="inres">Entrée :</label><input id="inres" type="number" value="72" readonly><span class="unit">Pixels/pouce</span></div>
+      <div class="row"><label for="outres">Sortie :</label><input id="outres" type="number" value="150" min="10" max="400"><span class="unit">Pixels/pouce</span></div>
+      <div class="sep"></div>
+      <div style="font-weight:bold">Mode</div>
+      <div class="row"><label for="mode">Avec :</label>
+        <select id="mode">
+          <option value="threshold">50 % Seuil</option>
+          <option value="pattern">Motif géométrique</option>
+          <option value="diffusion">Diffusion</option>
+          <option value="halftone" selected>Trame de demi-teintes…</option>
+        </select>
+      </div>
+    </fieldset>
+
+    <!-- ====== Fenêtre 2 : Trame de demi-teintes ====== -->
+    <fieldset class="dialog" id="dlgHalftone">
+      <legend>Trame de demi-teintes</legend>
+      <div class="row"><label for="lpi">Linéature :</label><input id="lpi" type="number" value="30" min="1" max="300"><span class="unit">Lignes/pouce</span></div>
+      <div class="row"><label for="angle">Angle :</label><input id="angle" type="number" value="45" min="-360" max="360" step="1"><span class="unit">degrés</span></div>
+      <div class="row"><label for="shape">Forme :</label>
+        <select id="shape">
+          <option value="circle">Cercle</option>
+          <option value="diamond">Losange</option>
+          <option value="ellipse">Ellipse</option>
+          <option value="line">Droite</option>
+          <option value="square">Carré</option>
+          <option value="cross">Croix</option>
+        </select>
+      </div>
+      <div class="controls" style="margin-top:12px">
+        <button id="loadPreset">Charger…</button>
+        <button id="savePreset">Enregistrer…</button>
+        <input type="file" id="presetFile" accept=".json,application/json" style="display:none">
+      </div>
+    </fieldset>
+  </div>
+</div>
+
+<video id="vid" playsinline></video>
+
+<script>
+(function(){
+  "use strict";
+  const vid   = document.getElementById('vid');
+  const cv    = document.getElementById('out');
+  const ctx   = cv.getContext('2d');
+  const vbuf  = document.createElement('canvas');
+  const vctx  = vbuf.getContext('2d', {willReadFrequently:true});
+  const $ = id => document.getElementById(id);
+
+  const inres=$('inres'), outres=$('outres'), mode=$('mode'),
+        lpi=$('lpi'), angle=$('angle'), shape=$('shape'),
+        dlgH=$('dlgHalftone'), playBtn=$('play'), seek=$('seek'),
+        timeEl=$('time'), recEl=$('rec'), dimnote=$('dimnote');
+
+  const MAX_PIXELS = 2000000; // plafond de traitment pour rester fluide
+  let ready=false, objectURL=null;
+
+  /* ---------- matrice de Bayer 8x8 (motif géométrique) ---------- */
+  const BAYER=(function(){
+    const grow=M=>{
+      const n=M.length, q=[];
+      for(let y=0;y<n;y++){
+        const r=[];
+        for(let x=0;x<n;x++) r.push(M[y][x]*4);
+        for(let x=0;x<n;x++) r.push(M[y][x]*4+2);
+        q.push(r);
+      }
+      for(let y=0;y<n;y++){
+        const r=[];
+        for(let x=0;x<n;x++) r.push(M[y][x]*4+3);
+        for(let x=0;x<n;x++) r.push(M[y][x]*4+1);
+        q.push(r);
+      }
+      return q;
+    };
+    let m=[[0]];
+    while(m.length<8) m=grow(m);
+    return m;
+  })();
+
+  /* ---------- fonctions de forme du point (spot) ---------- */
+  // x,y dans [-1,1] (centre de la cellule = 0). Renvoie ~1 au centre, ~-1 en bord.
+  function spotCircle(x,y){ return 1-(x*x+y*y); }
+  function spotDiamond(x,y){ return 1-(Math.abs(x)+Math.abs(y)); }
+  function spotEllipse(x,y){
+    return 1-0.5*(x*x+y*y+Math.abs(x)+Math.abs(y));
+  }
+  function spotSquare(x,y){ return 1-Math.max(Math.abs(x),Math.abs(y)); }
+  function spotLine(x,y){ return 1-Math.abs(y); }
+  function spotCross(x,y){ return 1-Math.min(Math.abs(x),Math.abs(y)); }
+  const SPOTS={circle:spotCircle, diamond:spotDiamond, ellipse:spotEllipse,
+               line:spotLine, square:spotSquare, cross:spotCross};
+
+  /* ---------- dimensions de sortie (recadrage résolution) ---------- */
+  function outSize(){
+    const scale = (parseFloat(outres.value)||72) / (parseFloat(inres.value)||72);
+    let w = Math.max(1, Math.round((vid.videoWidth||640)*scale));
+    let h = Math.max(1, Math.round((vid.videoHeight||360)*scale));
+    if(w*h>MAX_PIXELS){
+      const f=Math.sqrt(MAX_PIXELS/(w*h));
+      w=Math.max(1,Math.round(w*f)); h=Math.max(1,Math.round(h*f));
+      dimnote.textContent="⚠ Résolution réduite à "+w+"×"+h+
+        " (garder la fluidité). Baissez la résolution de sortie pour la précision maximale.";
+    }else{
+      dimnote.textContent="";
+    }
+    return [w,h];
+  }
+
+  /* ---------- conversion 1-bit ---------- */
+  function process(d,w,h){
+    const m=mode.value;
+    if(m==='threshold'){
+      for(let i=0;i<d.length;i+=4){
+        const v=d[i];
+        const lum=(v*0.299+d[i+1]*0.587+d[i+2]*0.114)<128?0:255;
+        d[i]=d[i+1]=d[i+2]=lum;
+      }
+      return;
+    }
+    if(m==='pattern'){
+      const k=255/64;
+      for(let y=0;y<h;y++){
+        const brow=BAYER[y&7];
+        let i=y*w*4;
+        for(let x=0;x<w;x++,i+=4){
+          const b=(brow[x&7]+0.5)*k;
+          const lum=d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114;
+          const v=lum<b?0:255;
+          d[i]=d[i+1]=d[i+2]=v;
+        }
+      }
+      return;
+    }
+    if(m==='diffusion'){
+      const buf=new Float32Array(w*h);
+      for(let i=0,j=0;i<d.length;i+=4,j++){
+        buf[j]=d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114;
+      }
+      for(let y=0;y<h;y++){
+        for(let x=0;x<w;x++){
+          const j=y*w+x;
+          const old=buf[j];
+          const nw=old<128?0:255;
+          const err=old-nw;
+          const di=j*4;
+          d[di]=d[di+1]=d[di+2]=nw;
+          if(x+1<w)      buf[j+1]   += err*7/16;
+          if(y+1<h){
+            if(x>0)      buf[j+w-1] += err*3/16;
+                         buf[j+w]   += err*5/16;
+            if(x+1<w)    buf[j+w+1] += err*1/16;
+          }
+        }
+      }
+      return;
+    }
+    // halftone : trame de demi-teintes
+    const spot=SPOTS[shape.value];
+    const n=Math.max(1,((parseFloat(outres.value)||72)/(parseFloat(lpi.value)||30)));
+    const a=(parseFloat(angle.value)||0)*Math.PI/180;
+    const c=Math.cos(a), s=Math.sin(a), inv=1/n;
+    for(let y=0;y<h;y++){
+      let i=y*w*4;
+      for(let x=0;x<w;x++,i+=4){
+        const u=(x*c+y*s)*inv, v=(y*c-x*s)*inv;
+        const fx=(u-Math.floor(u))*2-1;
+        const fy=(v-Math.floor(v))*2-1;
+        const lum=d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114;
+        const black=spot(fx,fy)>lum/127.5-1;
+        const p=black?0:255;
+        d[i]=d[i+1]=d[i+2]=p;
+      }
+    }
+  }
+
+  function render(){
+    if(!ready) return;
+    const [w,h]=outSize();
+    if(cv.width!==w||cv.height!==h){cv.width=w;cv.height=h;}
+    if(vbuf.width!==w||vbuf.height!==h){vbuf.width=w;vbuf.height=h;}
+    vctx.imageSmoothingEnabled=true;
+    vctx.imageSmoothingQuality='high';
+    vctx.drawImage(vid,0,0,w,h);
+    const img=vctx.getImageData(0,0,w,h);
+    process(img.data,w,h);
+    ctx.putImageData(img,0,0);
+  }
+
+  function loop(){
+    render();
+    updateTime();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  /* ---------- chargement vidéo ---------- */
+  const drop=$('drop'), fileIn=$('file');
+  drop.addEventListener('click',()=>fileIn.click());
+  ['dragover','dragenter'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over');}));
+  ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over');}));
+  drop.addEventListener('drop',e=>{ if(e.dataTransfer.files[0]) loadVideo(e.dataTransfer.files[0]); });
+  fileIn.addEventListener('change',()=>{ if(fileIn.files[0]) loadVideo(fileIn.files[0]); });
+
+  function loadVideo(f){
+    if(objectURL) URL.revokeObjectURL(objectURL);
+    objectURL=URL.createObjectURL(f);
+    vid.src=objectURL;
+    vid.loop=$('loop').checked;
+    vid.onloadedmetadata=()=>{
+      ready=true;
+      document.getElementById('app').style.display='';
+      vid.play().catch(()=>{});
+      playBtn.textContent='⏸ Pause';
+    };
+  }
+
+  /* ---------- lecture / timeline ---------- */
+  playBtn.addEventListener('click',()=>{
+    if(vid.paused){vid.play();playBtn.textContent='⏸ Pause';}
+    else{vid.pause();playBtn.textContent='▶ Lecture';}
+  });
+  $('loop').addEventListener('change',e=>{vid.loop=e.target.checked;});
+  seek.addEventListener('input',()=>{
+    if(vid.duration){vid.currentTime=seek.value/1000*vid.duration;}
+  });
+  function fmt(t){
+    if(!isFinite(t))t=0;
+    const m=Math.floor(t/60),s=Math.floor(t%60);
+    return m+':'+String(s).padStart(2,'0');
+  }
+  function updateTime(){
+    if(vid.duration){
+      seek.value=Math.round(vid.currentTime/vid.duration*1000);
+      timeEl.textContent=fmt(vid.currentTime)+' / '+fmt(vid.duration);
+    }
+  }
+
+  /* ---------- export WebM (vidéo bitmap) ---------- */
+  let recorder=null, chunks=[], audioCtx=null, audioDest=null, audioSrc=null;
+  function ensureAudio(){
+    if(audioSrc) return;
+    try{
+      audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+      audioSrc=audioCtx.createMediaElementSource(vid);
+      audioDest=audioCtx.createMediaStreamDestination();
+      audioSrc.connect(audioDest);
+      audioSrc.connect(audioCtx.destination);
+    }catch(e){ audioDest=null; }
+  }
+  $('export').addEventListener('click',()=>{
+    if(!vid.duration) return;
+    if(recorder&&recorder.state==='recording') stopRecording();
+    if(recorder&&recorder.state!=='inactive') return;
+    ensureAudio();
+    const stream=cv.captureStream(30);
+    if(audioDest){ audioDest.stream.getAudioTracks().forEach(t=>stream.addTrack(t)); }
+    let mime='video/webm;codecs=vp9';
+    if(!MediaRecorder.isTypeSupported(mime)) mime='video/webm';
+    chunks=[];
+    recorder=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:12000000});
+    recorder.ondataavailable=e=>{ if(e.data.size) chunks.push(e.data); };
+    recorder.onstop=()=>{
+      const blob=new Blob(chunks,{type:'video/webm'});
+      const a=document.createElement('a');
+      a.href=URL.createObjectURL(blob);
+      a.download='video-bitmap.webm';
+      a.click();
+      setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+      recEl.classList.remove('on');
+    };
+    vid.currentTime=0;
+    vid.play();
+    recorder.start(250);
+    recEl.classList.add('on');
+  });
+  function stopRecording(){ if(recorder&&recorder.state!=='inactive') recorder.stop(); }
+  vid.addEventListener('ended',()=>{ if(recorder&&recorder.state==='recording') stopRecording(); });
+
+  $('png').addEventListener('click',()=>{
+    cv.toBlob(b=>{
+      const a=document.createElement('a');
+      a.href=URL.createObjectURL(b);
+      a.download='image-bitmap.png';
+      a.click();
+      setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+    });
+  });
+
+  /* ---------- presets Charger / Enregistrer (comme Photoshop) ---------- */
+  $('savePreset').addEventListener('click',()=>{
+    const data={
+      resolutionSortie:parseFloat(outres.value),
+      mode:mode.value,
+      trame:{lineature:parseFloat(lpi.value),angle:parseFloat(angle.value),forme:shape.value}
+    };
+    const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download='trame-bitmap.json';
+    a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+  });
+  $('loadPreset').addEventListener('click',()=>$('presetFile').click());
+  $('presetFile').addEventListener('change',()=>{
+    const f=$('presetFile').files[0];
+    if(!f) return;
+    f.text().then(t=>{
+      try{
+        const d=JSON.parse(t);
+        if(d.resolutionSortie) outres.value=d.resolutionSortie;
+        if(d.mode) mode.value=d.mode;
+        if(d.trame){
+          if(d.trame.lineature!=null) lpi.value=d.trame.lineature;
+          if(d.trame.angle!=null) angle.value=d.trame.angle;
+          if(d.trame.forme) shape.value=d.trame.forme;
+        }
+        applyMode();
+      }catch(e){ alert('Fichier de trame invalide.'); }
+    });
+  });
+
+  /* ---------- affichage de la fenêtre trame ---------- */
+  function applyMode(){
+    dlgH.classList.toggle('hidden', mode.value!=='halftone');
+  }
+  mode.addEventListener('change',applyMode);
+  applyMode();
+})();
+</script>
+</body>
+</html>
