@@ -219,40 +219,22 @@
     </div>
   </div>
 
-  <div class="card" id="multiCard">
-    <label class="chk" style="margin-top:0" for="cirOn">
-      <input type="checkbox" id="cirOn"> Planètes par cercles : une couleur chacune
+    <div class="card" id="multiCard">
+    <label class="chk" style="margin-top:0" for="plOn">
+      <input type="checkbox" id="plOn"> Planètes suivies automatiquement (une couleur chacune)
     </label>
-    <div id="cirBody" class="hidden">
-      <div class="rowbtn">
-        <button id="cirAdd" class="ghost">+ Ajouter un cercle</button>
-        <button id="cirDel" class="ghost">Supprimer le choisi</button>
-      </div>
-      <div class="rowbtn">
-        <button id="cirUp" class="ghost">▲ Passer devant</button>
-        <button id="cirDn" class="ghost">▼ Passer derrière</button>
-      </div>
-      <label>X / Y / Rayon du cercle choisi</label>
-      <div class="duo">
-        <div><label for="cirX">X %</label><input type="range" id="cirX" min="0" max="100" value="50"></div>
-        <div><label for="cirY">Y %</label><input type="range" id="cirY" min="0" max="100" value="50"></div>
-        <div><label for="cirR">Rayon %</label><input type="range" id="cirR" min="2" max="100" value="18"></div>
-      </div>
-      <div class="rowbtn">
-        <button id="cirFixA" class="ghost">Fixer pose (A) ici</button>
-        <button id="cirFixB" class="ghost">Fixer pose (B) ici</button>
-      </div>
-      <label class="chk" for="cirFollow"><input type="checkbox" id="cirFollow"> ✨ Collage auto : le cercle suit la planète</label>
-      <div id="cirFollowBody" class="hidden">
-        <label for="cirThr">Seuil de détection (luminosité des planètes) <span class="val" id="cirThrv">35 %</span></label>
-        <input type="range" id="cirThr" min="5" max="90" step="1" value="35">
-      </div>
-      <div id="cirList"></div>
-      <p style="color:var(--muted);font-size:11px;line-height:1.5;margin:10px 0 0">Cliquez « + Ajouter » puis cliquez
-        sur l'image pour placer un cercle, et glissez-le à la souris. « Passer devant/derrière » définit quelle
-        planète couvre l'autre. Posez un cercle sur chaque planète : le collage auto détecte ses contours
-        image par image (le cercle épouse la planète et la suit dans ses déplacements). Les cercles ne sont
-        jamais visibles dans l'export.</p>
+    <div id="plBody" class="hidden">
+      <label for="plSat">Sensibilité aux couleurs <span class="val" id="plSatv">25 %</span></label>
+      <input type="range" id="plSat" min="5" max="60" step="1" value="25">
+      <label for="plLum">Luminosité minimum <span class="val" id="plLumv">12 %</span></label>
+      <input type="range" id="plLum" min="2" max="50" step="1" value="12">
+      <label class="chk" for="plMine"><input type="checkbox" id="plMine"> Utiliser mes couleurs (dans l'ordre de détection)</label>
+      <div id="plMineBody" class="hidden"><div id="plPairs"></div></div>
+      <div id="plState" style="font-size:11px;color:var(--muted);margin-top:8px"></div>
+      <p style="color:var(--muted);font-size:11px;line-height:1.5;margin:10px 0 0">L'outil analyse la vidéo : chaque
+        tache colorée (ou simplement claire) suffisamment grande est reconnue comme une planète puis suivie image
+        par image. Sa couleur vient d'elle-même (tons clair/sombre automatiques) ou de tes réglages ci-dessus.
+        Le ciel étoilé reste en palette principale. Ajuste la sensibilité si une planète passe inaperçue.</p>
     </div>
   </div>
   </div>
@@ -381,156 +363,50 @@ out.addEventListener('click', e => {
   out.style.cursor = '';
 });
 
-/* ---------- planètes par cercles : une couleur chacune ---------- */
-const cirOn = document.getElementById('cirOn'), cirBody = document.getElementById('cirBody');
-const cirList = document.getElementById('cirList');
-const cirAdd = document.getElementById('cirAdd'), cirDel = document.getElementById('cirDel');
-const cirUp = document.getElementById('cirUp'), cirDn = document.getElementById('cirDn');
-const cirX = document.getElementById('cirX'), cirY = document.getElementById('cirY'), cirR = document.getElementById('cirR');
-const cirFixA = document.getElementById('cirFixA'), cirFixB = document.getElementById('cirFixB');
-const cirFollow = document.getElementById('cirFollow'), cirThr = document.getElementById('cirThr');
-const DEF_PAIRS = [['#ff8888','#5c1414'],['#88ddff','#123a4d'],['#ffd97a','#4d360a'],
-                   ['#c89aff','#2a1050'],['#9dffb0','#123c1c'],['#ffb8e6','#40122e']];
-const circles = [];
-let selC = -1, addMode = false, dragging = false, cirPoses = [];
+/* ---------- planètes suivies automatiquement (détection par couleur) ---------- */
+const plOn = document.getElementById('plOn'), plBody = document.getElementById('plBody');
+const plSat = document.getElementById('plSat'), plLum = document.getElementById('plLum');
+const plState = document.getElementById('plState'), plMine = document.getElementById('plMine');
+plOn.addEventListener('change', () => {
+  plBody.classList.toggle('hidden', !plOn.checked);
+  plTracks.length = 0;
+});
+plSat.addEventListener('input', () => { document.getElementById('plSatv').textContent = plSat.value + ' %'; });
+plLum.addEventListener('input', () => { document.getElementById('plLumv').textContent = plLum.value + ' %'; });
+plMine.addEventListener('change', () =>
+  document.getElementById('plMineBody').classList.toggle('hidden', !plMine.checked));
 
-cirOn.addEventListener('change', () => cirBody.classList.toggle('hidden', !cirOn.checked));
-cirFollow.addEventListener('change', () =>
-  document.getElementById('cirFollowBody').classList.toggle('hidden', !cirFollow.checked));
-cirThr.addEventListener('input', () => {
-  document.getElementById('cirThrv').textContent = cirThr.value + ' %';
-});
-cirAdd.addEventListener('click', () => {
-  addMode = !addMode;
-  cirAdd.textContent = addMode ? 'Cliquez sur l’image…' : '+ Ajouter un cercle';
-});
-cirDel.addEventListener('click', () => {
-  if (selC < 0) return;
-  circles.splice(selC, 1);
-  selC = -1; dragging = false;
-  rebuildList();
-});
-function shiftSel(d){
-  if (selC < 0) return;
-  const t = selC + d;
-  if (t < 0 || t >= circles.length) return;
-  const swp = circles[selC]; circles[selC] = circles[t]; circles[t] = swp;
-  selC = t;
-  rebuildList();
-}
-cirUp.addEventListener('click', () => shiftSel(1));
-cirDn.addEventListener('click', () => shiftSel(-1));
-
-function poseAt(c, t){
-  if (!c.b) return { t, x: c.a.x, y: c.a.y, r: c.a.r };
-  const k = Math.max(0, Math.min(1, (t - c.a.t) / ((c.b.t - c.a.t) || 1e-6)));
-  return { t, x: c.a.x + (c.b.x - c.a.x) * k, y: c.a.y + (c.b.y - c.a.y) * k, r: c.a.r + (c.b.r - c.a.r) * k };
-}
-function activeKey(c, t){
-  if (!c.b) return 'a';
-  return t >= (c.a.t + c.b.t) / 2 ? 'b' : 'a';
-}
-/* position affichée / utilisée : celle détectée automatiquement si le collage auto est actif */
-function dispPose(c, t){
-  if (cirFollow.checked && !c.drag && c.trk) return c.trk;
-  return poseAt(c, t);
-}
-cirFixA.addEventListener('click', () => {
-  if (selC < 0) return;
-  const c = circles[selC], t = video.currentTime || 0, p = poseAt(c, t);
-  c.a = { t, x: p.x, y: p.y, r: p.r }; c.b = null;
-});
-cirFixB.addEventListener('click', () => {
-  if (selC < 0) return;
-  const c = circles[selC], t = video.currentTime || 0, p = poseAt(c, t);
-  c.b = { t, x: p.x, y: p.y, r: p.r };
-});
-
-function rebuildList(){
-  cirList.innerHTML = '';
-  circles.forEach((c, i) => {
+/* 6 emplacements de couleur (utilisés si « mes couleurs » est coché) */
+const plUser = [['#ff8888','#5c1414'],['#88ddff','#123a4d'],['#ffd97a','#4d360a'],
+                ['#c89aff','#2a1050'],['#9dffb0','#123c1c'],['#ffb8e6','#40122e']];
+(() => {
+  const host = document.getElementById('plPairs');
+  plUser.forEach((p, i) => {
     const row = document.createElement('div');
-    row.style.cssText = 'display:flex;align-items:center;gap:6px;margin-top:6px;' +
-      (i === selC ? 'outline:1px solid var(--violet);padding:3px' : '');
+    row.style.cssText = 'display:flex;align-items:center;gap:6px;margin-top:6px';
     const lab = document.createElement('span');
-    lab.style.cssText = 'font-size:11px;color:var(--muted);min-width:40px;cursor:pointer';
-    lab.textContent = '№ ' + (i + 1) + (i === selC ? ' ●' : '');
-    lab.addEventListener('click', () => { selC = i; rebuildList(); });
-    const ca = document.createElement('input'); ca.type = 'color'; ca.value = c.colA;
+    lab.style.cssText = 'font-size:11px;color:var(--muted);min-width:48px';
+    lab.textContent = 'Planète ' + (i + 1);
+    const ca = document.createElement('input'); ca.type = 'color'; ca.value = p[0];
     ca.style.cssText = 'flex:1;height:26px;width:auto';
-    ca.addEventListener('input', () => { c.colA = ca.value; });
-    const cb = document.createElement('input'); cb.type = 'color'; cb.value = c.colB;
+    ca.addEventListener('input', () => { p[0] = ca.value; });
+    const cb = document.createElement('input'); cb.type = 'color'; cb.value = p[1];
     cb.style.cssText = 'flex:1;height:26px;width:auto';
-    cb.addEventListener('input', () => { c.colB = cb.value; });
+    cb.addEventListener('input', () => { p[1] = cb.value; });
     row.appendChild(lab); row.appendChild(ca); row.appendChild(cb);
-    cirList.appendChild(row);
+    host.appendChild(row);
   });
+})();
+
+/* pistes de suivi : { h, grey, x, y, r, t, slot, cl, cd } — identité par teinte, position en secours */
+const plTracks = [], plSlotHue = new Array(12).fill(-1);
+let plCount = 0;
+function pltDistHue(a, b){ const d = Math.abs(a - b); return Math.min(d, 1 - d); }
+function pltDerive(rgb){   /* tons clair / sombre générés depuis la couleur moyenne de la planète */
+  const l = Math.max(1, lumOf(rgb));
+  return [rgb.map(v => Math.min(255, Math.round(v * 235 / l))),
+          rgb.map(v => Math.min(255, Math.round(v * 40 / l)))];
 }
-function syncSel(){
-  if (selC < 0) return;
-  const p = dispPose(circles[selC], video.currentTime || 0);
-  cirX.value = Math.round(p.x * 100);
-  cirY.value = Math.round(p.y * 100);
-  cirR.value = Math.round(p.r * 100);
-}
-function canvasPos(e){
-  const r = out.getBoundingClientRect();
-  return { x: Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)),
-           y: Math.max(0, Math.min(1, (e.clientY - r.top) / r.height)) };
-}
-function hitCircle(p){
-  const W = out.width || 1, H = out.height || 1, t = video.currentTime || 0;
-  for (let i = circles.length - 1; i >= 0; i--) {
-    const q = dispPose(circles[i], t);
-    const dx = (p.x - q.x) * W, dy = (p.y - q.y) * H;
-    if (dx * dx + dy * dy <= (q.r / 2 * W) ** 2) return i;
-  }
-  return -1;
-}
-out.addEventListener('pointerdown', e => {
-  if (!cirOn.checked || video.readyState < 2) return;
-  const p = canvasPos(e);
-  if (addMode) {
-    const dp = DEF_PAIRS[circles.length % DEF_PAIRS.length];
-    circles.push({ a: { t: video.currentTime || 0, x: p.x, y: p.y, r: 0.18 }, b: null,
-                   colA: dp[0], colB: dp[1] });
-    selC = circles.length - 1;
-    addMode = false;
-    circles[selC].drag = true;
-    cirAdd.textContent = '+ Ajouter un cercle';
-    rebuildList(); syncSel();
-    dragging = true;
-    out.setPointerCapture(e.pointerId);
-    return;
-  }
-  const hit = hitCircle(p);
-  if (hit >= 0) {
-    selC = hit; dragging = true;
-    circles[hit].drag = true;
-    out.setPointerCapture(e.pointerId);
-    rebuildList();
-  }
-});
-out.addEventListener('pointermove', e => {
-  if (!dragging || selC < 0) return;
-  const p = canvasPos(e);
-  const c = circles[selC], key = activeKey(c, video.currentTime || 0);
-  c[key].x = p.x; c[key].y = p.y;
-  syncSel();
-});
-out.addEventListener('pointerup', () => { dragging = false; circles.forEach(c => c.drag = false); });
-cirX.addEventListener('input', () => {
-  if (selC < 0) return;
-  circles[selC][activeKey(circles[selC], video.currentTime || 0)].x = cirX.value / 100;
-});
-cirY.addEventListener('input', () => {
-  if (selC < 0) return;
-  circles[selC][activeKey(circles[selC], video.currentTime || 0)].y = cirY.value / 100;
-});
-cirR.addEventListener('input', () => {
-  if (selC < 0) return;
-  circles[selC][activeKey(circles[selC], video.currentTime || 0)].r = cirR.value / 100;
-});
 
 let looping = true;
 
@@ -662,84 +538,129 @@ function process() {
     rampSub = [hex2rgb(zSub1.value), hex2rgb(zSub2.value)].sort((a, b) => lumOf(a) - lumOf(b));
   }
 
-  /* planètes par cercles : pixel → dernier cercle posé qui le contient */
-  let cirMap = null, cirPairs = null;
-  cirPoses = [];
-  if (cirOn.checked && circles.length && video.readyState >= 2) {
+  /* planètes suivies automatiquement : détection par couleur + suivi image par image */
+  let plMap = null, plPairs = null;
+  if (plOn.checked && video.readyState >= 2) {
+    const satMin = (parseFloat(plSat.value) || 25) / 100;
+    const lumMin = (parseFloat(plLum.value) || 12) / 100;
+    const lumBr = lumMin + 0.3;   /* objets clairs : planètes grises / hautes lumières */
     const t = video.currentTime || 0;
-    cirPairs = circles.map(c => [hex2rgb(c.colA), hex2rgb(c.colB)].sort((a, b) => lumOf(a) - lumOf(b)));
-    cirPoses = circles.map(c => dispPose(c, t));
-    cirMap = new Int16Array(sw * sh).fill(-1);
-    for (let i = 0; i < circles.length; i++) {
-      const p = cirPoses[i], cx = p.x * sw, cy = p.y * sh, rp = Math.max(1, p.r * sw);
+    const hueOf = i0 => {
+      const r = d[i0] / 255, g = d[i0+1] / 255, b = d[i0+2] / 255;
+      const mx = Math.max(r, g, b), mn = Math.min(r, g, b), ch = mx - mn;
+      const l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      if (l < lumMin) return null;
+      if (ch < satMin * mx) return l >= lumBr ? { h: 0, grey: true } : null;
+      let h = mx === r ? ((g - b) / ch) % 6 : mx === g ? (b - r) / ch + 2 : (r - g) / ch + 4;
+      h /= 6; if (h < 0) h += 1;
+      return { h, grey: false };
+    };
+    const lab = new Int16Array(sw * sh).fill(-1);
+    const comps = [];
+    const stack = new Int32Array(sw * sh);
+    for (let s = 0; s < sw * sh; s++) {
+      if (lab[s] !== -1) continue;
+      if (!hueOf(s * 4)) continue;
+      const id = comps.length;
+      let sp = 0; stack[sp++] = s; lab[s] = id;
+      let ar = 0, sumr = 0, sumg = 0, sumb = 0, sumx = 0, sumy = 0;
+      while (sp) {
+        const j = stack[--sp], x = j % sw, y = (j / sw) | 0, i1 = j * 4;
+        ar++; sumr += d[i1]; sumg += d[i1+1]; sumb += d[i1+2]; sumx += x; sumy += y;
+        if (x > 0      && lab[j - 1]  === -1 && hueOf((j - 1)  * 4)) { lab[j - 1]  = id; stack[sp++] = j - 1; }
+        if (x + 1 < sw && lab[j + 1]  === -1 && hueOf((j + 1)  * 4)) { lab[j + 1]  = id; stack[sp++] = j + 1; }
+        if (y > 0      && lab[j - sw] === -1 && hueOf((j - sw) * 4)) { lab[j - sw] = id; stack[sp++] = j - sw; }
+        if (y + 1 < sh && lab[j + sw] === -1 && hueOf((j + sw) * 4)) { lab[j + sw] = id; stack[sp++] = j + sw; }
+      }
+      const rgbm = [sumr / ar / 255, sumg / ar / 255, sumb / ar / 255];
+      const mxm = Math.max(rgbm[0], rgbm[1], rgbm[2]), mnm = Math.min(rgbm[0], rgbm[1], rgbm[2]);
+      const chm = mxm - mnm, grey = chm < satMin * mxm;
+      let hm = 0;
+      if (!grey && chm > 0) {
+        hm = mxm === rgbm[0] ? ((rgbm[1] - rgbm[2]) / chm) % 6 : mxm === rgbm[1] ? (rgbm[2] - rgbm[0]) / chm + 2 : (rgbm[0] - rgbm[1]) / chm + 4;
+        hm /= 6; if (hm < 0) hm += 1;
+      }
+      comps.push({ x: sumx / ar, y: sumy / ar, area: ar, rFit: Math.sqrt(ar / Math.PI),
+                   rgb: rgbm, h: hm, grey, sat: mxm > 0 ? chm / mxm : 0 });
+    }
+    /* pistes expirées → nettoyage */
+    for (let i = plTracks.length - 1; i >= 0; i--) if (t - plTracks[i].t > 0.8) plTracks.splice(i, 1);
+    /* les plus grosses taches d'abord (les étoiles, trop petites, sont ignorées), 6 maximum */
+    const order = comps.map((c, i) => ({ i, a: c.area })).filter(o => o.a >= 5)
+      .sort((a, b) => b.a - a.a).slice(0, 6).map(o => o.i);
+    const compTrack = new Int16Array(comps.length).fill(-1);
+    const prs = [];
+    order.forEach(qi => {
+      const cp = comps[qi];
+      plTracks.forEach((tr, ti) => {
+        const hd = cp.grey ? 0 : pltDistHue(cp.h, tr.h);
+        const dn = Math.hypot(cp.x - tr.x, cp.y - tr.y) / (Math.max(2, tr.r + cp.rFit) + 4);
+        if (hd > 0.14 && dn > 1.6) return;
+        prs.push({ qi, ti, sc: hd * 2 + dn });
+      });
+    });
+    prs.sort((a, b) => a.sc - b.sc);
+    const taken = new Set();
+    for (const q of prs) {
+      if (compTrack[q.qi] !== -1 || taken.has(q.ti)) continue;
+      compTrack[q.qi] = q.ti; taken.add(q.ti);
+    }
+    /* taches non rapprochées → nouvelles pistes (numéro stable grâce à la mémoire de teinte) */
+    order.forEach(qi => {
+      const cp = comps[qi];
+      if (compTrack[qi] !== -1) return;
+      const key = Math.round(cp.h * 12) % 12;
+      let slot = !cp.grey && plSlotHue[key] >= 0 ? plSlotHue[key] : -1;
+      if (slot < 0 || plTracks.some(tr => tr.slot === slot)) {
+        slot = 0;
+        while (slot < 6 && plTracks.some(tr => tr.slot === slot)) slot++;
+      }
+      if (slot >= 6) return;          /* trop de planètes : celle-ci reste en palette principale */
+      if (!cp.grey) plSlotHue[key] = slot;
+      plTracks.push({ h: cp.h, grey: cp.grey, x: cp.x, y: cp.y, r: cp.rFit, t, slot, cl: null, cd: null });
+      compTrack[qi] = plTracks.length - 1;
+    });
+    /* mise à jour des pistes (position + couleur du ton clair/sombre de la planète) */
+    order.forEach(qi => {
+      const cp = comps[qi], ti = compTrack[qi];
+      if (ti < 0) return;
+      const tr = plTracks[ti], pr = pltDerive([cp.rgb[0] * 255, cp.rgb[1] * 255, cp.rgb[2] * 255]);
+      tr.x = cp.x; tr.y = cp.y; tr.r = cp.rFit; tr.t = t;
+      if (!cp.grey) tr.h = cp.h;
+      tr.grey = cp.grey;
+      tr.cl = pr[0]; tr.cd = pr[1];
+    });
+    /* carte pixel → numéro de planète : silhouette exacte, puis disque ajusté (côté sombre, galbes) */
+    plMap = new Int16Array(sw * sh).fill(-1);
+    for (let j = 0; j < plMap.length; j++) {
+      const li = lab[j];
+      if (li >= 0 && compTrack[li] >= 0) plMap[j] = plTracks[compTrack[li]].slot;
+    }
+    for (const qi of order) {
+      const ti = compTrack[qi]; if (ti < 0) continue;
+      const cp = comps[qi], cx = cp.x, cy = cp.y, rp = Math.max(1, cp.rFit * 1.12);
       for (let y = Math.max(0, Math.floor(cy - rp)); y <= Math.min(sh - 1, Math.ceil(cy + rp)); y++) {
         const dy2 = (y + 0.5 - cy) ** 2;
         for (let x = Math.max(0, Math.floor(cx - rp)); x <= Math.min(sw - 1, Math.ceil(cx + rp)); x++) {
-          if ((x + 0.5 - cx) ** 2 + dy2 <= rp * rp) cirMap[y * sw + x] = i;
+          const j = y * sw + x;
+          if (plMap[j] === -1 && (x + 0.5 - cx) ** 2 + dy2 <= rp * rp) plMap[j] = plTracks[ti].slot;
         }
       }
     }
-
-    /* collage auto : détection des taches claires (composantes connexes) puis association
-       à chaque cercle — les pixels détectés remplacent le disque géométrique */
-    if (cirFollow.checked) {
-      const thr = (parseFloat(cirThr.value) || 35) / 100;
-      const lum = new Float32Array(sw * sh);
-      for (let j = 0, i0 = 0; j < lum.length; j++, i0 += 4)
-        lum[j] = (0.2126 * d[i0] + 0.7152 * d[i0+1] + 0.0722 * d[i0+2]) / 255;
-      const lab = new Int32Array(sw * sh).fill(-1);
-      const comps = [], compOwner = [];
-      const stack = new Int32Array(sw * sh);
-      for (let s = 0; s < sw * sh; s++) {
-        if (lab[s] !== -1 || lum[s] < thr) continue;
-        const id = comps.length;
-        let sp = 0; stack[sp++] = s; lab[s] = id;
-        let sumx = 0, sumy = 0, area = 0;
-        while (sp) {
-          const j = stack[--sp], x = j % sw, y = (j / sw) | 0;
-          area++; sumx += x; sumy += y;
-          if (x > 0 && lab[j - 1] === -1 && lum[j - 1] >= thr) { lab[j - 1] = id; stack[sp++] = j - 1; }
-          if (x + 1 < sw && lab[j + 1] === -1 && lum[j + 1] >= thr) { lab[j + 1] = id; stack[sp++] = j + 1; }
-          if (y > 0 && lab[j - sw] === -1 && lum[j - sw] >= thr) { lab[j - sw] = id; stack[sp++] = j - sw; }
-          if (y + 1 < sh && lab[j + sw] === -1 && lum[j + sw] >= thr) { lab[j + sw] = id; stack[sp++] = j + sw; }
-        }
-        comps.push({ cx: sumx / area, cy: sumy / area, area });
-        compOwner.push(-1);
-      }
-      /* association : les cercles de devant d'abord (planètes entièrement visibles),
-         chaque tache est prise au plus une fois, à condition d'être proche et de taille plausible */
-      for (let i = circles.length - 1; i >= 0; i--) {
-        const c = circles[i];
-        if (c.drag) continue;
-        const base = poseAt(c, t);
-        const trkFresh = (c.trk && Math.abs((c.trk.t || 0) - t) < 0.5) ? c.trk : null;
-        const pr = Math.max(2, base.r * sw);
-        const lim = pr * 1.4 + 4, prMin = pr * 0.15, prMax = pr * 2.5;
-        let best = -1, bestD2 = Infinity;
-        for (let q = 0; q < comps.length; q++) {
-          if (compOwner[q] !== -1) continue;
-          const cp = comps[q];
-          if (cp.area < 4) continue;
-          const fr = Math.sqrt(cp.area / Math.PI);
-          if (fr < prMin || fr > prMax) continue;
-          const d2t = trkFresh ? (cp.cx - trkFresh.x * sw) ** 2 + (cp.cy - trkFresh.y * sh) ** 2 : Infinity;
-          const d2p = (cp.cx - base.x * sw) ** 2 + (cp.cy - base.y * sh) ** 2;
-          const d2 = Math.min(d2t, d2p);
-          if (d2 <= lim * lim && d2 < bestD2) { bestD2 = d2; best = q; }
-        }
-        if (best >= 0) {
-          compOwner[best] = i;
-          const cp = comps[best];
-          c.trk = { t, x: cp.cx / sw, y: cp.cy / sh, r: Math.sqrt(cp.area / Math.PI) / sw };
-        }
-      }
-      /* les pixels de chaque tache adoptée prennent les couleurs de son cercle */
-      for (let q = 0; q < comps.length; q++) {
-        const own = compOwner[q];
-        if (own < 0) continue;
-        for (let j = 0; j < cirMap.length; j++) if (lab[j] === q) cirMap[j] = own;
-      }
-    }
+    /* couleurs par emplacement (automatiques d'après la planète, ou les tiennes) */
+    plPairs = new Array(6).fill(null);
+    const seenCols = new Set();
+    plTracks.forEach(tr => {
+      if (seenCols.has(tr.slot)) return;
+      seenCols.add(tr.slot);
+      plPairs[tr.slot] = plMine.checked
+        ? [hex2rgb(plUser[tr.slot][0]), hex2rgb(plUser[tr.slot][1])].sort((a, b) => lumOf(a) - lumOf(b))
+        : [tr.cd, tr.cl];
+    });
+    plCount = seenCols.size;
+    plState.textContent = plCount
+      ? '✅ ' + plCount + ' planète' + (plCount > 1 ? 's' : '') + ' suivie' + (plCount > 1 ? 's' : '') + ' — une couleur chacune'
+      : 'Aucune planète détectée pour l’instant… (augmente la luminosité minimum ou baisse la sensibilité aux couleurs)';
   }
 
   if (mode === 'diffusion') {
@@ -749,7 +670,7 @@ function process() {
     for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) {
       const j = y * sw + x;
       const old = Math.min(1, Math.max(0, f[j]));
-      const pg = cirMap ? cirMap[j] : -1;
+      const pg = plMap ? plMap[j] : -1;
       const mm = pg >= 0 ? 1 : (msk ? 1 : m);
       let k = Math.floor(old * mm);
       if (old * mm - k > 0.5 && k < mm) k++;
@@ -760,7 +681,7 @@ function process() {
                              f[j + sw]     += err * 5 / 16;
         if (x + 1 < sw)      f[j + sw + 1] += err * 1 / 16;
       }
-      paint(d, j, pg >= 0 ? cirPairs[pg][k] : msk ? (msk[j] ? rampSub[k] : rampSky[k]) : ramp[k]);
+      paint(d, j, pg >= 0 ? plPairs[pg][k] : msk ? (msk[j] ? rampSub[k] : rampSky[k]) : ramp[k]);
     }
   } else if (mode === 'halftone') {
     buildSpotLUT();
@@ -773,23 +694,23 @@ function process() {
       const l = Math.pow((0.2126 * d[i0] + 0.7152 * d[i0+1] + 0.0722 * d[i0+2]) / 255, gam);
       const u = (x * cs + y * sn) * inv, v = (y * cs - x * sn) * inv;
       const fx = (u - Math.floor(u)) * 2 - 1, fy = (v - Math.floor(v)) * 2 - 1;
-      const pg = cirMap ? cirMap[j] : -1;
+      const pg = plMap ? plMap[j] : -1;
       const mm = pg >= 0 ? 1 : (msk ? 1 : m);
       const base = l * mm;
       let k = Math.floor(base); if (k < 0) k = 0; else if (k > mm) k = mm;
       if (k < mm && spot(fx, fy) < spotSorted[(base - k) * 4095 | 0]) k++;
-      paint(d, j, pg >= 0 ? cirPairs[pg][k] : msk ? (msk[j] ? rampSub[k] : rampSky[k]) : ramp[k]);
+      paint(d, j, pg >= 0 ? plPairs[pg][k] : msk ? (msk[j] ? rampSub[k] : rampSky[k]) : ramp[k]);
     }
   } else {
     for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) {
       const j = y * sw + x, i0 = j * 4;
-      const pg = cirMap ? cirMap[j] : -1;
+      const pg = plMap ? plMap[j] : -1;
       const mm = pg >= 0 ? 1 : (msk ? 1 : m);
       const l = Math.pow((0.2126 * d[i0] + 0.7152 * d[i0+1] + 0.0722 * d[i0+2]) / 255, gam) * mm;
       let k = Math.floor(l); if (k < 0) k = 0;
       const frac = l - k;
       if (k < mm && (mode === 'none' ? frac > 0.5 : frac > bayerT(x, y))) k++;
-      paint(d, j, pg >= 0 ? cirPairs[pg][k] : msk ? (msk[j] ? rampSub[k] : rampSky[k]) : ramp[k]);
+      paint(d, j, pg >= 0 ? plPairs[pg][k] : msk ? (msk[j] ? rampSub[k] : rampSky[k]) : ramp[k]);
     }
   }
   if (msk && zed.checked) {
@@ -802,13 +723,13 @@ function process() {
   }
   bctx.putImageData(img, 0, 0);
   ctx.drawImage(buf, 0, 0);
-  if (cirOn.checked && cirMap) {
-    ctx.save(); ctx.setLineDash([4, 3]);
-    cirPoses.forEach((p, i) => {
-      ctx.strokeStyle = 'rgba(165,139,250,0.9)';
-      ctx.lineWidth = i === selC ? 2 : 1;
+  if (plOn.checked && plTracks.length) {
+    ctx.save(); ctx.setLineDash([4, 3]); ctx.lineWidth = 1;
+    plTracks.forEach((tr) => {
+      const g = tr.cl || [165, 139, 250];
+      ctx.strokeStyle = 'rgba(' + Math.round(g[0]) + ',' + Math.round(g[1]) + ',' + Math.round(g[2]) + ',0.95)';
       ctx.beginPath();
-      ctx.arc(p.x * sw, p.y * sh, Math.max(2, p.r * sw), 0, Math.PI * 2);
+      ctx.arc(tr.x * sw, tr.y * sh, Math.max(2, tr.r), 0, Math.PI * 2);
       ctx.stroke();
     });
     ctx.restore();
@@ -968,10 +889,9 @@ document.getElementById('savePreset').addEventListener('click', () => {
       subClaire: zSub1.value, subSombre: zSub2.value,
       contour: zed.checked, couleurContour: zEdgeCol.value
     },
-    cercles: {
-      on: cirOn.checked,
-      liste: circles.map(c => ({ a: c.a, b: c.b, colA: c.colA, colB: c.colB })),
-      suivi: { on: cirFollow.checked, seuil: cirThr.value }
+    planetes: {
+      on: plOn.checked, sat: plSat.value, lum: plLum.value, mine: plMine.checked,
+      paires: plUser.map(p => [p[0], p[1]])
     }
   };
   const a = document.createElement('a');
@@ -1014,22 +934,15 @@ document.getElementById('presetFile').addEventListener('change', e => {
         document.getElementById('edgeColRow').classList.toggle('hidden', !zed.checked);
         if (d.zones.couleurContour) zEdgeCol.value = d.zones.couleurContour;
       }
-      if (d.cercles) {
-        cirOn.checked = !!d.cercles.on;
-        cirBody.classList.toggle('hidden', !cirOn.checked);
-        if (d.cercles.suivi) {
-          cirFollow.checked = !!d.cercles.suivi.on;
-          document.getElementById('cirFollowBody').classList.toggle('hidden', !cirFollow.checked);
-          if (d.cercles.suivi.seuil != null) {
-            cirThr.value = d.cercles.suivi.seuil;
-            document.getElementById('cirThrv').textContent = cirThr.value + ' %';
-          }
-        }
-        circles.length = 0;
-        (d.cercles.liste || []).forEach(c =>
-          circles.push({ a: c.a, b: c.b || null, colA: c.colA, colB: c.colB }));
-        selC = circles.length ? 0 : -1;
-        rebuildList();
+      if (d.planetes) {
+        plOn.checked = !!d.planetes.on;
+        plBody.classList.toggle('hidden', !plOn.checked);
+        if (d.planetes.sat != null) { plSat.value = d.planetes.sat; document.getElementById('plSatv').textContent = plSat.value + ' %'; }
+        if (d.planetes.lum != null) { plLum.value = d.planetes.lum; document.getElementById('plLumv').textContent = plLum.value + ' %'; }
+        plMine.checked = !!d.planetes.mine;
+        document.getElementById('plMineBody').classList.toggle('hidden', !plMine.checked);
+        (d.planetes.paires || []).forEach((p, i) => { if (plUser[i]) { plUser[i][0] = p[0]; plUser[i][1] = p[1]; } });
+        document.querySelectorAll('#plPairs input[type=color]').forEach((el, i) => { el.value = plUser[(i / 2) | 0][i % 2]; });
       }
     } catch (err) { alert('Preset invalide.'); }
   });
@@ -1041,7 +954,6 @@ function loop(ts) {
   const target = 1000 / (parseInt(fpsSel.value, 10) || 30);
   if (!lastFrame || ts - lastFrame >= target - 2) {
     lastFrame = ts; process(); updateTime();
-    if (cirOn.checked) syncSel();
   }
   requestAnimationFrame(loop);
 }
