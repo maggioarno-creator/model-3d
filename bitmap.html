@@ -242,10 +242,16 @@
         <button id="cirFixA" class="ghost">Fixer pose (A) ici</button>
         <button id="cirFixB" class="ghost">Fixer pose (B) ici</button>
       </div>
+      <label class="chk" for="cirFollow"><input type="checkbox" id="cirFollow"> ✨ Collage auto : le cercle suit la planète</label>
+      <div id="cirFollowBody" class="hidden">
+        <label for="cirThr">Seuil de détection (luminosité des planètes) <span class="val" id="cirThrv">35 %</span></label>
+        <input type="range" id="cirThr" min="5" max="90" step="1" value="35">
+      </div>
       <div id="cirList"></div>
       <p style="color:var(--muted);font-size:11px;line-height:1.5;margin:10px 0 0">Cliquez « + Ajouter » puis cliquez
         sur l'image pour placer un cercle, et glissez-le à la souris. « Passer devant/derrière » définit quelle
-        planète couvre l'autre. Les cercles glissent entre les poses A et B pendant la lecture et ne sont
+        planète couvre l'autre. Posez un cercle sur chaque planète : le collage auto détecte ses contours
+        image par image (le cercle épouse la planète et la suit dans ses déplacements). Les cercles ne sont
         jamais visibles dans l'export.</p>
     </div>
   </div>
@@ -382,12 +388,18 @@ const cirAdd = document.getElementById('cirAdd'), cirDel = document.getElementBy
 const cirUp = document.getElementById('cirUp'), cirDn = document.getElementById('cirDn');
 const cirX = document.getElementById('cirX'), cirY = document.getElementById('cirY'), cirR = document.getElementById('cirR');
 const cirFixA = document.getElementById('cirFixA'), cirFixB = document.getElementById('cirFixB');
+const cirFollow = document.getElementById('cirFollow'), cirThr = document.getElementById('cirThr');
 const DEF_PAIRS = [['#ff8888','#5c1414'],['#88ddff','#123a4d'],['#ffd97a','#4d360a'],
                    ['#c89aff','#2a1050'],['#9dffb0','#123c1c'],['#ffb8e6','#40122e']];
 const circles = [];
 let selC = -1, addMode = false, dragging = false, cirPoses = [];
 
 cirOn.addEventListener('change', () => cirBody.classList.toggle('hidden', !cirOn.checked));
+cirFollow.addEventListener('change', () =>
+  document.getElementById('cirFollowBody').classList.toggle('hidden', !cirFollow.checked));
+cirThr.addEventListener('input', () => {
+  document.getElementById('cirThrv').textContent = cirThr.value + ' %';
+});
 cirAdd.addEventListener('click', () => {
   addMode = !addMode;
   cirAdd.textContent = addMode ? 'Cliquez sur l’image…' : '+ Ajouter un cercle';
@@ -417,6 +429,11 @@ function poseAt(c, t){
 function activeKey(c, t){
   if (!c.b) return 'a';
   return t >= (c.a.t + c.b.t) / 2 ? 'b' : 'a';
+}
+/* position affichée / utilisée : celle détectée automatiquement si le collage auto est actif */
+function dispPose(c, t){
+  if (cirFollow.checked && !c.drag && c.trk) return c.trk;
+  return poseAt(c, t);
 }
 cirFixA.addEventListener('click', () => {
   if (selC < 0) return;
@@ -451,7 +468,7 @@ function rebuildList(){
 }
 function syncSel(){
   if (selC < 0) return;
-  const p = poseAt(circles[selC], video.currentTime || 0);
+  const p = dispPose(circles[selC], video.currentTime || 0);
   cirX.value = Math.round(p.x * 100);
   cirY.value = Math.round(p.y * 100);
   cirR.value = Math.round(p.r * 100);
@@ -464,7 +481,7 @@ function canvasPos(e){
 function hitCircle(p){
   const W = out.width || 1, H = out.height || 1, t = video.currentTime || 0;
   for (let i = circles.length - 1; i >= 0; i--) {
-    const q = poseAt(circles[i], t);
+    const q = dispPose(circles[i], t);
     const dx = (p.x - q.x) * W, dy = (p.y - q.y) * H;
     if (dx * dx + dy * dy <= (q.r / 2 * W) ** 2) return i;
   }
@@ -479,6 +496,7 @@ out.addEventListener('pointerdown', e => {
                    colA: dp[0], colB: dp[1] });
     selC = circles.length - 1;
     addMode = false;
+    circles[selC].drag = true;
     cirAdd.textContent = '+ Ajouter un cercle';
     rebuildList(); syncSel();
     dragging = true;
@@ -488,6 +506,7 @@ out.addEventListener('pointerdown', e => {
   const hit = hitCircle(p);
   if (hit >= 0) {
     selC = hit; dragging = true;
+    circles[hit].drag = true;
     out.setPointerCapture(e.pointerId);
     rebuildList();
   }
@@ -499,7 +518,7 @@ out.addEventListener('pointermove', e => {
   c[key].x = p.x; c[key].y = p.y;
   syncSel();
 });
-out.addEventListener('pointerup', () => { dragging = false; });
+out.addEventListener('pointerup', () => { dragging = false; circles.forEach(c => c.drag = false); });
 cirX.addEventListener('input', () => {
   if (selC < 0) return;
   circles[selC][activeKey(circles[selC], video.currentTime || 0)].x = cirX.value / 100;
@@ -648,8 +667,8 @@ function process() {
   cirPoses = [];
   if (cirOn.checked && circles.length && video.readyState >= 2) {
     const t = video.currentTime || 0;
-    cirPoses = circles.map(c => poseAt(c, t));
     cirPairs = circles.map(c => [hex2rgb(c.colA), hex2rgb(c.colB)].sort((a, b) => lumOf(a) - lumOf(b)));
+    cirPoses = circles.map(c => dispPose(c, t));
     cirMap = new Int16Array(sw * sh).fill(-1);
     for (let i = 0; i < circles.length; i++) {
       const p = cirPoses[i], cx = p.x * sw, cy = p.y * sh, rp = Math.max(1, p.r * sw);
@@ -658,6 +677,67 @@ function process() {
         for (let x = Math.max(0, Math.floor(cx - rp)); x <= Math.min(sw - 1, Math.ceil(cx + rp)); x++) {
           if ((x + 0.5 - cx) ** 2 + dy2 <= rp * rp) cirMap[y * sw + x] = i;
         }
+      }
+    }
+
+    /* collage auto : détection des taches claires (composantes connexes) puis association
+       à chaque cercle — les pixels détectés remplacent le disque géométrique */
+    if (cirFollow.checked) {
+      const thr = (parseFloat(cirThr.value) || 35) / 100;
+      const lum = new Float32Array(sw * sh);
+      for (let j = 0, i0 = 0; j < lum.length; j++, i0 += 4)
+        lum[j] = (0.2126 * d[i0] + 0.7152 * d[i0+1] + 0.0722 * d[i0+2]) / 255;
+      const lab = new Int32Array(sw * sh).fill(-1);
+      const comps = [], compOwner = [];
+      const stack = new Int32Array(sw * sh);
+      for (let s = 0; s < sw * sh; s++) {
+        if (lab[s] !== -1 || lum[s] < thr) continue;
+        const id = comps.length;
+        let sp = 0; stack[sp++] = s; lab[s] = id;
+        let sumx = 0, sumy = 0, area = 0;
+        while (sp) {
+          const j = stack[--sp], x = j % sw, y = (j / sw) | 0;
+          area++; sumx += x; sumy += y;
+          if (x > 0 && lab[j - 1] === -1 && lum[j - 1] >= thr) { lab[j - 1] = id; stack[sp++] = j - 1; }
+          if (x + 1 < sw && lab[j + 1] === -1 && lum[j + 1] >= thr) { lab[j + 1] = id; stack[sp++] = j + 1; }
+          if (y > 0 && lab[j - sw] === -1 && lum[j - sw] >= thr) { lab[j - sw] = id; stack[sp++] = j - sw; }
+          if (y + 1 < sh && lab[j + sw] === -1 && lum[j + sw] >= thr) { lab[j + sw] = id; stack[sp++] = j + sw; }
+        }
+        comps.push({ cx: sumx / area, cy: sumy / area, area });
+        compOwner.push(-1);
+      }
+      /* association : les cercles de devant d'abord (planètes entièrement visibles),
+         chaque tache est prise au plus une fois, à condition d'être proche et de taille plausible */
+      for (let i = circles.length - 1; i >= 0; i--) {
+        const c = circles[i];
+        if (c.drag) continue;
+        const base = poseAt(c, t);
+        const trkFresh = (c.trk && Math.abs((c.trk.t || 0) - t) < 0.5) ? c.trk : null;
+        const pr = Math.max(2, base.r * sw);
+        const lim = pr * 1.4 + 4, prMin = pr * 0.15, prMax = pr * 2.5;
+        let best = -1, bestD2 = Infinity;
+        for (let q = 0; q < comps.length; q++) {
+          if (compOwner[q] !== -1) continue;
+          const cp = comps[q];
+          if (cp.area < 4) continue;
+          const fr = Math.sqrt(cp.area / Math.PI);
+          if (fr < prMin || fr > prMax) continue;
+          const d2t = trkFresh ? (cp.cx - trkFresh.x * sw) ** 2 + (cp.cy - trkFresh.y * sh) ** 2 : Infinity;
+          const d2p = (cp.cx - base.x * sw) ** 2 + (cp.cy - base.y * sh) ** 2;
+          const d2 = Math.min(d2t, d2p);
+          if (d2 <= lim * lim && d2 < bestD2) { bestD2 = d2; best = q; }
+        }
+        if (best >= 0) {
+          compOwner[best] = i;
+          const cp = comps[best];
+          c.trk = { t, x: cp.cx / sw, y: cp.cy / sh, r: Math.sqrt(cp.area / Math.PI) / sw };
+        }
+      }
+      /* les pixels de chaque tache adoptée prennent les couleurs de son cercle */
+      for (let q = 0; q < comps.length; q++) {
+        const own = compOwner[q];
+        if (own < 0) continue;
+        for (let j = 0; j < cirMap.length; j++) if (lab[j] === q) cirMap[j] = own;
       }
     }
   }
@@ -890,7 +970,8 @@ document.getElementById('savePreset').addEventListener('click', () => {
     },
     cercles: {
       on: cirOn.checked,
-      liste: circles.map(c => ({ a: c.a, b: c.b, colA: c.colA, colB: c.colB }))
+      liste: circles.map(c => ({ a: c.a, b: c.b, colA: c.colA, colB: c.colB })),
+      suivi: { on: cirFollow.checked, seuil: cirThr.value }
     }
   };
   const a = document.createElement('a');
@@ -936,6 +1017,14 @@ document.getElementById('presetFile').addEventListener('change', e => {
       if (d.cercles) {
         cirOn.checked = !!d.cercles.on;
         cirBody.classList.toggle('hidden', !cirOn.checked);
+        if (d.cercles.suivi) {
+          cirFollow.checked = !!d.cercles.suivi.on;
+          document.getElementById('cirFollowBody').classList.toggle('hidden', !cirFollow.checked);
+          if (d.cercles.suivi.seuil != null) {
+            cirThr.value = d.cercles.suivi.seuil;
+            document.getElementById('cirThrv').textContent = cirThr.value + ' %';
+          }
+        }
         circles.length = 0;
         (d.cercles.liste || []).forEach(c =>
           circles.push({ a: c.a, b: c.b || null, colA: c.colA, colB: c.colB }));
