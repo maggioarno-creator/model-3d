@@ -220,29 +220,33 @@
   </div>
 
   <div class="card" id="multiCard">
-    <label class="chk" style="margin-top:0" for="mon">
-      <input type="checkbox" id="mon"> Plusieurs objets : une couleur par planète
+    <label class="chk" style="margin-top:0" for="cirOn">
+      <input type="checkbox" id="cirOn"> Planètes par cercles : une couleur chacune
     </label>
-    <div id="multiBody" class="hidden">
-      <label for="mThr">Seuil de détection <span class="val" id="mThrv">12 %</span></label>
-      <input type="range" id="mThr" min="5" max="60" step="1" value="12" />
-      <p style="color:var(--muted);font-size:11px;line-height:1.5;margin:10px 0 0">Chaque tache claire assez grande
-        (planète) reçolt sa palette, numérotée de gauche à droite. Les planètes ne doivent pas se toucher.
-        Matériaux gris neutres dans Blender recommandés.</p>
-      <div class="duo">
-        <div><label for="mp1a">1 (gauche) — claire</label><input type="color" id="mp1a" value="#ff4d4d"></div>
-        <div><label for="mp1b">1 — sombre</label><input type="color" id="mp1b" value="#5c0f0f"></div>
-        <div><label for="mp2a">2 — claire</label><input type="color" id="mp2a" value="#4ddbff"></div>
-        <div><label for="mp2b">2 — sombre</label><input type="color" id="mp2b" value="#0a2e40"></div>
-        <div><label for="mp3a">3 — claire</label><input type="color" id="mp3a" value="#ffd24d"></div>
-        <div><label for="mp3b">3 — sombre</label><input type="color" id="mp3b" value="#4d360a"></div>
-        <div><label for="mp4a">4 — claire</label><input type="color" id="mp4a" value="#b066ff"></div>
-        <div><label for="mp4b">4 — sombre</label><input type="color" id="mp4b" value="#2a0f4d"></div>
-        <div><label for="mp5a">5 — claire</label><input type="color" id="mp5a" value="#6bff8f"></div>
-        <div><label for="mp5b">5 — sombre</label><input type="color" id="mp5b" value="#0d3316"></div>
-        <div><label for="mp6a">6 (droite) — claire</label><input type="color" id="mp6a" value="#ff8ad0"></div>
-        <div><label for="mp6b">6 — sombre</label><input type="color" id="mp6b" value="#40102e"></div>
+    <div id="cirBody" class="hidden">
+      <div class="rowbtn">
+        <button id="cirAdd" class="ghost">+ Ajouter un cercle</button>
+        <button id="cirDel" class="ghost">Supprimer le choisi</button>
       </div>
+      <div class="rowbtn">
+        <button id="cirUp" class="ghost">▲ Passer devant</button>
+        <button id="cirDn" class="ghost">▼ Passer derrière</button>
+      </div>
+      <label>X / Y / Rayon du cercle choisi</label>
+      <div class="duo">
+        <div><label for="cirX">X %</label><input type="range" id="cirX" min="0" max="100" value="50"></div>
+        <div><label for="cirY">Y %</label><input type="range" id="cirY" min="0" max="100" value="50"></div>
+        <div><label for="cirR">Rayon %</label><input type="range" id="cirR" min="2" max="100" value="18"></div>
+      </div>
+      <div class="rowbtn">
+        <button id="cirFixA" class="ghost">Fixer pose (A) ici</button>
+        <button id="cirFixB" class="ghost">Fixer pose (B) ici</button>
+      </div>
+      <div id="cirList"></div>
+      <p style="color:var(--muted);font-size:11px;line-height:1.5;margin:10px 0 0">Cliquez « + Ajouter » puis cliquez
+        sur l'image pour placer un cercle, et glissez-le à la souris. « Passer devant/derrière » définit quelle
+        planète couvre l'autre. Les cercles glissent entre les poses A et B pendant la lecture et ne sont
+        jamais visibles dans l'export.</p>
     </div>
   </div>
   </div>
@@ -371,22 +375,143 @@ out.addEventListener('click', e => {
   out.style.cursor = '';
 });
 
-/* ---------- plusieurs objets : une couleur par planète (pur ajout) ---------- */
-const mon = document.getElementById('mon'), mbody = document.getElementById('multiBody');
-const mThrIn = document.getElementById('mThr');
-mon.addEventListener('change', () => {
-  mbody.classList.toggle('hidden', !mon.checked);
+/* ---------- planètes par cercles : une couleur chacune ---------- */
+const cirOn = document.getElementById('cirOn'), cirBody = document.getElementById('cirBody');
+const cirList = document.getElementById('cirList');
+const cirAdd = document.getElementById('cirAdd'), cirDel = document.getElementById('cirDel');
+const cirUp = document.getElementById('cirUp'), cirDn = document.getElementById('cirDn');
+const cirX = document.getElementById('cirX'), cirY = document.getElementById('cirY'), cirR = document.getElementById('cirR');
+const cirFixA = document.getElementById('cirFixA'), cirFixB = document.getElementById('cirFixB');
+const DEF_PAIRS = [['#ff8888','#5c1414'],['#88ddff','#123a4d'],['#ffd97a','#4d360a'],
+                   ['#c89aff','#2a1050'],['#9dffb0','#123c1c'],['#ffb8e6','#40122e']];
+const circles = [];
+let selC = -1, addMode = false, dragging = false, cirPoses = [];
+
+cirOn.addEventListener('change', () => cirBody.classList.toggle('hidden', !cirOn.checked));
+cirAdd.addEventListener('click', () => {
+  addMode = !addMode;
+  cirAdd.textContent = addMode ? 'Cliquez sur l’image…' : '+ Ajouter un cercle';
 });
-mThrIn.addEventListener('input', () => {
-  document.getElementById('mThrv').textContent = mThrIn.value + ' %';
+cirDel.addEventListener('click', () => {
+  if (selC < 0) return;
+  circles.splice(selC, 1);
+  selC = -1; dragging = false;
+  rebuildList();
 });
-function pairsHex(){
-  const arr = [];
-  for (let s = 1; s <= 6; s++)
-    arr.push({ a: document.getElementById('mp' + s + 'a').value,
-               b: document.getElementById('mp' + s + 'b').value });
-  return arr;
+function shiftSel(d){
+  if (selC < 0) return;
+  const t = selC + d;
+  if (t < 0 || t >= circles.length) return;
+  const swp = circles[selC]; circles[selC] = circles[t]; circles[t] = swp;
+  selC = t;
+  rebuildList();
 }
+cirUp.addEventListener('click', () => shiftSel(1));
+cirDn.addEventListener('click', () => shiftSel(-1));
+
+function poseAt(c, t){
+  if (!c.b) return { t, x: c.a.x, y: c.a.y, r: c.a.r };
+  const k = Math.max(0, Math.min(1, (t - c.a.t) / ((c.b.t - c.a.t) || 1e-6)));
+  return { t, x: c.a.x + (c.b.x - c.a.x) * k, y: c.a.y + (c.b.y - c.a.y) * k, r: c.a.r + (c.b.r - c.a.r) * k };
+}
+function activeKey(c, t){
+  if (!c.b) return 'a';
+  return t >= (c.a.t + c.b.t) / 2 ? 'b' : 'a';
+}
+cirFixA.addEventListener('click', () => {
+  if (selC < 0) return;
+  const c = circles[selC], t = video.currentTime || 0, p = poseAt(c, t);
+  c.a = { t, x: p.x, y: p.y, r: p.r }; c.b = null;
+});
+cirFixB.addEventListener('click', () => {
+  if (selC < 0) return;
+  const c = circles[selC], t = video.currentTime || 0, p = poseAt(c, t);
+  c.b = { t, x: p.x, y: p.y, r: p.r };
+});
+
+function rebuildList(){
+  cirList.innerHTML = '';
+  circles.forEach((c, i) => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:6px;margin-top:6px;' +
+      (i === selC ? 'outline:1px solid var(--violet);padding:3px' : '');
+    const lab = document.createElement('span');
+    lab.style.cssText = 'font-size:11px;color:var(--muted);min-width:40px;cursor:pointer';
+    lab.textContent = '№ ' + (i + 1) + (i === selC ? ' ●' : '');
+    lab.addEventListener('click', () => { selC = i; rebuildList(); });
+    const ca = document.createElement('input'); ca.type = 'color'; ca.value = c.colA;
+    ca.style.cssText = 'flex:1;height:26px;width:auto';
+    ca.addEventListener('input', () => { c.colA = ca.value; });
+    const cb = document.createElement('input'); cb.type = 'color'; cb.value = c.colB;
+    cb.style.cssText = 'flex:1;height:26px;width:auto';
+    cb.addEventListener('input', () => { c.colB = cb.value; });
+    row.appendChild(lab); row.appendChild(ca); row.appendChild(cb);
+    cirList.appendChild(row);
+  });
+}
+function syncSel(){
+  if (selC < 0) return;
+  const p = poseAt(circles[selC], video.currentTime || 0);
+  cirX.value = Math.round(p.x * 100);
+  cirY.value = Math.round(p.y * 100);
+  cirR.value = Math.round(p.r * 100);
+}
+function canvasPos(e){
+  const r = out.getBoundingClientRect();
+  return { x: Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)),
+           y: Math.max(0, Math.min(1, (e.clientY - r.top) / r.height)) };
+}
+function hitCircle(p){
+  const W = out.width || 1, H = out.height || 1, t = video.currentTime || 0;
+  for (let i = circles.length - 1; i >= 0; i--) {
+    const q = poseAt(circles[i], t);
+    const dx = (p.x - q.x) * W, dy = (p.y - q.y) * H;
+    if (dx * dx + dy * dy <= (q.r / 2 * W) ** 2) return i;
+  }
+  return -1;
+}
+out.addEventListener('pointerdown', e => {
+  if (!cirOn.checked || video.readyState < 2) return;
+  const p = canvasPos(e);
+  if (addMode) {
+    const dp = DEF_PAIRS[circles.length % DEF_PAIRS.length];
+    circles.push({ a: { t: video.currentTime || 0, x: p.x, y: p.y, r: 0.18 }, b: null,
+                   colA: dp[0], colB: dp[1] });
+    selC = circles.length - 1;
+    addMode = false;
+    cirAdd.textContent = '+ Ajouter un cercle';
+    rebuildList(); syncSel();
+    dragging = true;
+    out.setPointerCapture(e.pointerId);
+    return;
+  }
+  const hit = hitCircle(p);
+  if (hit >= 0) {
+    selC = hit; dragging = true;
+    out.setPointerCapture(e.pointerId);
+    rebuildList();
+  }
+});
+out.addEventListener('pointermove', e => {
+  if (!dragging || selC < 0) return;
+  const p = canvasPos(e);
+  const c = circles[selC], key = activeKey(c, video.currentTime || 0);
+  c[key].x = p.x; c[key].y = p.y;
+  syncSel();
+});
+out.addEventListener('pointerup', () => { dragging = false; });
+cirX.addEventListener('input', () => {
+  if (selC < 0) return;
+  circles[selC][activeKey(circles[selC], video.currentTime || 0)].x = cirX.value / 100;
+});
+cirY.addEventListener('input', () => {
+  if (selC < 0) return;
+  circles[selC][activeKey(circles[selC], video.currentTime || 0)].y = cirY.value / 100;
+});
+cirR.addEventListener('input', () => {
+  if (selC < 0) return;
+  circles[selC][activeKey(circles[selC], video.currentTime || 0)].r = cirR.value / 100;
+});
 
 let looping = true;
 
@@ -518,43 +643,23 @@ function process() {
     rampSub = [hex2rgb(zSub1.value), hex2rgb(zSub2.value)].sort((a, b) => lumOf(a) - lumOf(b));
   }
 
-  /* plusieurs objets : taches claires connexes = planètes, palette 2 tons chacune */
-  let compIdx = null, pairs = null;
-  if (mon.checked && video.readyState >= 2) {
-    const thrL = parseFloat(mThrIn.value) / 100 * 255;
-    pairs = [];
-    for (let s = 1; s <= 6; s++) {
-      const a = hex2rgb(document.getElementById('mp' + s + 'a').value);
-      const b = hex2rgb(document.getElementById('mp' + s + 'b').value);
-      pairs.push([a, b].sort((x, y) => lumOf(x) - lumOf(y)));
-    }
-    const N = sw * sh;
-    compIdx = new Int16Array(N).fill(-1);
-    const bright = new Uint8Array(N);
-    for (let j = 0, i0 = 0; j < N; j++, i0 += 4)
-      bright[j] = (0.2126 * d[i0] + 0.7152 * d[i0+1] + 0.0722 * d[i0+2]) >= thrL ? 1 : 0;
-    const stack = new Int32Array(N);
-    const comps = [];
-    let label = 0;
-    for (let seed = 0; seed < N; seed++) {
-      if (!bright[seed] || compIdx[seed] !== -1) continue;
-      label++;
-      let top = 0, area = 0, cx = 0;
-      stack[top++] = seed; compIdx[seed] = label;
-      while (top) {
-        const j = stack[--top], x = j % sw, y = (j / sw) | 0;
-        area++; cx += x;
-        if (x + 1 < sw && bright[j + 1] && compIdx[j + 1] === -1) { compIdx[j + 1] = label; stack[top++] = j + 1; }
-        if (x > 0 && bright[j - 1] && compIdx[j - 1] === -1) { compIdx[j - 1] = label; stack[top++] = j - 1; }
-        if (y + 1 < sh && bright[j + sw] && compIdx[j + sw] === -1) { compIdx[j + sw] = label; stack[top++] = j + sw; }
-        if (y > 0 && bright[j - sw] && compIdx[j - sw] === -1) { compIdx[j - sw] = label; stack[top++] = j - sw; }
+  /* planètes par cercles : pixel → dernier cercle posé qui le contient */
+  let cirMap = null, cirPairs = null;
+  cirPoses = [];
+  if (cirOn.checked && circles.length && video.readyState >= 2) {
+    const t = video.currentTime || 0;
+    cirPoses = circles.map(c => poseAt(c, t));
+    cirPairs = circles.map(c => [hex2rgb(c.colA), hex2rgb(c.colB)].sort((a, b) => lumOf(a) - lumOf(b)));
+    cirMap = new Int16Array(sw * sh).fill(-1);
+    for (let i = 0; i < circles.length; i++) {
+      const p = cirPoses[i], cx = p.x * sw, cy = p.y * sh, rp = Math.max(1, p.r * sw);
+      for (let y = Math.max(0, Math.floor(cy - rp)); y <= Math.min(sh - 1, Math.ceil(cy + rp)); y++) {
+        const dy2 = (y + 0.5 - cy) ** 2;
+        for (let x = Math.max(0, Math.floor(cx - rp)); x <= Math.min(sw - 1, Math.ceil(cx + rp)); x++) {
+          if ((x + 0.5 - cx) ** 2 + dy2 <= rp * rp) cirMap[y * sw + x] = i;
+        }
       }
-      comps.push({ id: label, area, cx: cx / area });
     }
-    const minA = Math.max(32, (N * 0.002) | 0);
-    const big = comps.filter(c => c.area >= minA).sort((a, b) => a.cx - b.cx).slice(0, 6);
-    const mp = new Map(); big.forEach((c, i) => mp.set(c.id, i));
-    for (let j = 0; j < N; j++) { const id = compIdx[j]; compIdx[j] = (id > 0 && mp.has(id)) ? mp.get(id) : -1; }
   }
 
   if (mode === 'diffusion') {
@@ -564,7 +669,7 @@ function process() {
     for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) {
       const j = y * sw + x;
       const old = Math.min(1, Math.max(0, f[j]));
-      const pg = compIdx ? compIdx[j] : -1;
+      const pg = cirMap ? cirMap[j] : -1;
       const mm = pg >= 0 ? 1 : (msk ? 1 : m);
       let k = Math.floor(old * mm);
       if (old * mm - k > 0.5 && k < mm) k++;
@@ -575,7 +680,7 @@ function process() {
                              f[j + sw]     += err * 5 / 16;
         if (x + 1 < sw)      f[j + sw + 1] += err * 1 / 16;
       }
-      paint(d, j, pg >= 0 ? pairs[pg][k] : msk ? (msk[j] ? rampSub[k] : rampSky[k]) : ramp[k]);
+      paint(d, j, pg >= 0 ? cirPairs[pg][k] : msk ? (msk[j] ? rampSub[k] : rampSky[k]) : ramp[k]);
     }
   } else if (mode === 'halftone') {
     buildSpotLUT();
@@ -588,23 +693,23 @@ function process() {
       const l = Math.pow((0.2126 * d[i0] + 0.7152 * d[i0+1] + 0.0722 * d[i0+2]) / 255, gam);
       const u = (x * cs + y * sn) * inv, v = (y * cs - x * sn) * inv;
       const fx = (u - Math.floor(u)) * 2 - 1, fy = (v - Math.floor(v)) * 2 - 1;
-      const pg = compIdx ? compIdx[j] : -1;
+      const pg = cirMap ? cirMap[j] : -1;
       const mm = pg >= 0 ? 1 : (msk ? 1 : m);
       const base = l * mm;
       let k = Math.floor(base); if (k < 0) k = 0; else if (k > mm) k = mm;
       if (k < mm && spot(fx, fy) < spotSorted[(base - k) * 4095 | 0]) k++;
-      paint(d, j, pg >= 0 ? pairs[pg][k] : msk ? (msk[j] ? rampSub[k] : rampSky[k]) : ramp[k]);
+      paint(d, j, pg >= 0 ? cirPairs[pg][k] : msk ? (msk[j] ? rampSub[k] : rampSky[k]) : ramp[k]);
     }
   } else {
     for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) {
       const j = y * sw + x, i0 = j * 4;
-      const pg = compIdx ? compIdx[j] : -1;
+      const pg = cirMap ? cirMap[j] : -1;
       const mm = pg >= 0 ? 1 : (msk ? 1 : m);
       const l = Math.pow((0.2126 * d[i0] + 0.7152 * d[i0+1] + 0.0722 * d[i0+2]) / 255, gam) * mm;
       let k = Math.floor(l); if (k < 0) k = 0;
       const frac = l - k;
       if (k < mm && (mode === 'none' ? frac > 0.5 : frac > bayerT(x, y))) k++;
-      paint(d, j, pg >= 0 ? pairs[pg][k] : msk ? (msk[j] ? rampSub[k] : rampSky[k]) : ramp[k]);
+      paint(d, j, pg >= 0 ? cirPairs[pg][k] : msk ? (msk[j] ? rampSub[k] : rampSky[k]) : ramp[k]);
     }
   }
   if (msk && zed.checked) {
@@ -617,6 +722,17 @@ function process() {
   }
   bctx.putImageData(img, 0, 0);
   ctx.drawImage(buf, 0, 0);
+  if (cirOn.checked && cirMap) {
+    ctx.save(); ctx.setLineDash([4, 3]);
+    cirPoses.forEach((p, i) => {
+      ctx.strokeStyle = 'rgba(165,139,250,0.9)';
+      ctx.lineWidth = i === selC ? 2 : 1;
+      ctx.beginPath();
+      ctx.arc(p.x * sw, p.y * sh, Math.max(2, p.r * sw), 0, Math.PI * 2);
+      ctx.stroke();
+    });
+    ctx.restore();
+  }
 
   const esc = parseInt(escSel.value, 10) || 4;
   if (expCv.width !== sw * esc || expCv.height !== sh * esc) {
@@ -772,9 +888,9 @@ document.getElementById('savePreset').addEventListener('click', () => {
       subClaire: zSub1.value, subSombre: zSub2.value,
       contour: zed.checked, couleurContour: zEdgeCol.value
     },
-    multi: {
-      on: mon.checked, seuil: mThrIn.value,
-      planetes: pairsHex()
+    cercles: {
+      on: cirOn.checked,
+      liste: circles.map(c => ({ a: c.a, b: c.b, colA: c.colA, colB: c.colB }))
     }
   };
   const a = document.createElement('a');
@@ -817,15 +933,14 @@ document.getElementById('presetFile').addEventListener('change', e => {
         document.getElementById('edgeColRow').classList.toggle('hidden', !zed.checked);
         if (d.zones.couleurContour) zEdgeCol.value = d.zones.couleurContour;
       }
-      if (d.multi) {
-        mon.checked = !!d.multi.on;
-        mbody.classList.toggle('hidden', !mon.checked);
-        if (d.multi.seuil != null) { mThrIn.value = d.multi.seuil; mThrIn.dispatchEvent(new Event('input')); }
-        if (d.multi.planetes) d.multi.planetes.forEach((c, i) => {
-          if (!c) return;
-          if (c.a) document.getElementById('mp' + (i + 1) + 'a').value = c.a;
-          if (c.b) document.getElementById('mp' + (i + 1) + 'b').value = c.b;
-        });
+      if (d.cercles) {
+        cirOn.checked = !!d.cercles.on;
+        cirBody.classList.toggle('hidden', !cirOn.checked);
+        circles.length = 0;
+        (d.cercles.liste || []).forEach(c =>
+          circles.push({ a: c.a, b: c.b || null, colA: c.colA, colB: c.colB }));
+        selC = circles.length ? 0 : -1;
+        rebuildList();
       }
     } catch (err) { alert('Preset invalide.'); }
   });
@@ -835,7 +950,10 @@ document.getElementById('presetFile').addEventListener('change', e => {
 let lastFrame = 0;
 function loop(ts) {
   const target = 1000 / (parseInt(fpsSel.value, 10) || 30);
-  if (!lastFrame || ts - lastFrame >= target - 2) { lastFrame = ts; process(); updateTime(); }
+  if (!lastFrame || ts - lastFrame >= target - 2) {
+    lastFrame = ts; process(); updateTime();
+    if (cirOn.checked) syncSel();
+  }
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
