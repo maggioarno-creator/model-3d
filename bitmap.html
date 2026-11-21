@@ -218,6 +218,33 @@
         Astuce planète : pipetez une zone sombre du ciel (pas une étoile).</p>
     </div>
   </div>
+
+  <div class="card" id="multiCard">
+    <label class="chk" style="margin-top:0" for="mon">
+      <input type="checkbox" id="mon"> Plusieurs objets : une couleur par planète
+    </label>
+    <div id="multiBody" class="hidden">
+      <label for="mThr">Seuil de détection <span class="val" id="mThrv">12 %</span></label>
+      <input type="range" id="mThr" min="5" max="60" step="1" value="12" />
+      <p style="color:var(--muted);font-size:11px;line-height:1.5;margin:10px 0 0">Chaque tache claire assez grande
+        (planète) reçolt sa palette, numérotée de gauche à droite. Les planètes ne doivent pas se toucher.
+        Matériaux gris neutres dans Blender recommandés.</p>
+      <div class="duo">
+        <div><label for="mp1a">1 (gauche) — claire</label><input type="color" id="mp1a" value="#ff4d4d"></div>
+        <div><label for="mp1b">1 — sombre</label><input type="color" id="mp1b" value="#5c0f0f"></div>
+        <div><label for="mp2a">2 — claire</label><input type="color" id="mp2a" value="#4ddbff"></div>
+        <div><label for="mp2b">2 — sombre</label><input type="color" id="mp2b" value="#0a2e40"></div>
+        <div><label for="mp3a">3 — claire</label><input type="color" id="mp3a" value="#ffd24d"></div>
+        <div><label for="mp3b">3 — sombre</label><input type="color" id="mp3b" value="#4d360a"></div>
+        <div><label for="mp4a">4 — claire</label><input type="color" id="mp4a" value="#b066ff"></div>
+        <div><label for="mp4b">4 — sombre</label><input type="color" id="mp4b" value="#2a0f4d"></div>
+        <div><label for="mp5a">5 — claire</label><input type="color" id="mp5a" value="#6bff8f"></div>
+        <div><label for="mp5b">5 — sombre</label><input type="color" id="mp5b" value="#0d3316"></div>
+        <div><label for="mp6a">6 (droite) — claire</label><input type="color" id="mp6a" value="#ff8ad0"></div>
+        <div><label for="mp6b">6 — sombre</label><input type="color" id="mp6b" value="#40102e"></div>
+      </div>
+    </div>
+  </div>
   </div>
 </div>
 
@@ -343,6 +370,23 @@ out.addEventListener('click', e => {
   pipeBtn.textContent = 'Pipette';
   out.style.cursor = '';
 });
+
+/* ---------- plusieurs objets : une couleur par planète (pur ajout) ---------- */
+const mon = document.getElementById('mon'), mbody = document.getElementById('multiBody');
+const mThrIn = document.getElementById('mThr');
+mon.addEventListener('change', () => {
+  mbody.classList.toggle('hidden', !mon.checked);
+});
+mThrIn.addEventListener('input', () => {
+  document.getElementById('mThrv').textContent = mThrIn.value + ' %';
+});
+function pairsHex(){
+  const arr = [];
+  for (let s = 1; s <= 6; s++)
+    arr.push({ a: document.getElementById('mp' + s + 'a').value,
+               b: document.getElementById('mp' + s + 'b').value });
+  return arr;
+}
 
 let looping = true;
 
@@ -474,6 +518,45 @@ function process() {
     rampSub = [hex2rgb(zSub1.value), hex2rgb(zSub2.value)].sort((a, b) => lumOf(a) - lumOf(b));
   }
 
+  /* plusieurs objets : taches claires connexes = planètes, palette 2 tons chacune */
+  let compIdx = null, pairs = null;
+  if (mon.checked && video.readyState >= 2) {
+    const thrL = parseFloat(mThrIn.value) / 100 * 255;
+    pairs = [];
+    for (let s = 1; s <= 6; s++) {
+      const a = hex2rgb(document.getElementById('mp' + s + 'a').value);
+      const b = hex2rgb(document.getElementById('mp' + s + 'b').value);
+      pairs.push([a, b].sort((x, y) => lumOf(x) - lumOf(y)));
+    }
+    const N = sw * sh;
+    compIdx = new Int16Array(N).fill(-1);
+    const bright = new Uint8Array(N);
+    for (let j = 0, i0 = 0; j < N; j++, i0 += 4)
+      bright[j] = (0.2126 * d[i0] + 0.7152 * d[i0+1] + 0.0722 * d[i0+2]) >= thrL ? 1 : 0;
+    const stack = new Int32Array(N);
+    const comps = [];
+    let label = 0;
+    for (let seed = 0; seed < N; seed++) {
+      if (!bright[seed] || compIdx[seed] !== -1) continue;
+      label++;
+      let top = 0, area = 0, cx = 0;
+      stack[top++] = seed; compIdx[seed] = label;
+      while (top) {
+        const j = stack[--top], x = j % sw, y = (j / sw) | 0;
+        area++; cx += x;
+        if (x + 1 < sw && bright[j + 1] && compIdx[j + 1] === -1) { compIdx[j + 1] = label; stack[top++] = j + 1; }
+        if (x > 0 && bright[j - 1] && compIdx[j - 1] === -1) { compIdx[j - 1] = label; stack[top++] = j - 1; }
+        if (y + 1 < sh && bright[j + sw] && compIdx[j + sw] === -1) { compIdx[j + sw] = label; stack[top++] = j + sw; }
+        if (y > 0 && bright[j - sw] && compIdx[j - sw] === -1) { compIdx[j - sw] = label; stack[top++] = j - sw; }
+      }
+      comps.push({ id: label, area, cx: cx / area });
+    }
+    const minA = Math.max(32, (N * 0.002) | 0);
+    const big = comps.filter(c => c.area >= minA).sort((a, b) => a.cx - b.cx).slice(0, 6);
+    const mp = new Map(); big.forEach((c, i) => mp.set(c.id, i));
+    for (let j = 0; j < N; j++) { const id = compIdx[j]; compIdx[j] = (id > 0 && mp.has(id)) ? mp.get(id) : -1; }
+  }
+
   if (mode === 'diffusion') {
     const f = new Float32Array(sw * sh);
     for (let j = 0, i = 0; j < f.length; j++, i += 4)
@@ -481,7 +564,8 @@ function process() {
     for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) {
       const j = y * sw + x;
       const old = Math.min(1, Math.max(0, f[j]));
-      const mm = msk ? 1 : m;
+      const pg = compIdx ? compIdx[j] : -1;
+      const mm = pg >= 0 ? 1 : (msk ? 1 : m);
       let k = Math.floor(old * mm);
       if (old * mm - k > 0.5 && k < mm) k++;
       const err = old - k / mm;
@@ -491,7 +575,7 @@ function process() {
                              f[j + sw]     += err * 5 / 16;
         if (x + 1 < sw)      f[j + sw + 1] += err * 1 / 16;
       }
-      paint(d, j, msk ? (msk[j] ? rampSub[k] : rampSky[k]) : ramp[k]);
+      paint(d, j, pg >= 0 ? pairs[pg][k] : msk ? (msk[j] ? rampSub[k] : rampSky[k]) : ramp[k]);
     }
   } else if (mode === 'halftone') {
     buildSpotLUT();
@@ -504,21 +588,23 @@ function process() {
       const l = Math.pow((0.2126 * d[i0] + 0.7152 * d[i0+1] + 0.0722 * d[i0+2]) / 255, gam);
       const u = (x * cs + y * sn) * inv, v = (y * cs - x * sn) * inv;
       const fx = (u - Math.floor(u)) * 2 - 1, fy = (v - Math.floor(v)) * 2 - 1;
-      const mm = msk ? 1 : m;
+      const pg = compIdx ? compIdx[j] : -1;
+      const mm = pg >= 0 ? 1 : (msk ? 1 : m);
       const base = l * mm;
       let k = Math.floor(base); if (k < 0) k = 0; else if (k > mm) k = mm;
       if (k < mm && spot(fx, fy) < spotSorted[(base - k) * 4095 | 0]) k++;
-      paint(d, j, msk ? (msk[j] ? rampSub[k] : rampSky[k]) : ramp[k]);
+      paint(d, j, pg >= 0 ? pairs[pg][k] : msk ? (msk[j] ? rampSub[k] : rampSky[k]) : ramp[k]);
     }
   } else {
     for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) {
       const j = y * sw + x, i0 = j * 4;
-      const mm = msk ? 1 : m;
+      const pg = compIdx ? compIdx[j] : -1;
+      const mm = pg >= 0 ? 1 : (msk ? 1 : m);
       const l = Math.pow((0.2126 * d[i0] + 0.7152 * d[i0+1] + 0.0722 * d[i0+2]) / 255, gam) * mm;
       let k = Math.floor(l); if (k < 0) k = 0;
       const frac = l - k;
       if (k < mm && (mode === 'none' ? frac > 0.5 : frac > bayerT(x, y))) k++;
-      paint(d, j, msk ? (msk[j] ? rampSub[k] : rampSky[k]) : ramp[k]);
+      paint(d, j, pg >= 0 ? pairs[pg][k] : msk ? (msk[j] ? rampSub[k] : rampSky[k]) : ramp[k]);
     }
   }
   if (msk && zed.checked) {
@@ -685,6 +771,10 @@ document.getElementById('savePreset').addEventListener('click', () => {
       skyClaire: zSky1.value, skySombre: zSky2.value,
       subClaire: zSub1.value, subSombre: zSub2.value,
       contour: zed.checked, couleurContour: zEdgeCol.value
+    },
+    multi: {
+      on: mon.checked, seuil: mThrIn.value,
+      planetes: pairsHex()
     }
   };
   const a = document.createElement('a');
@@ -726,6 +816,16 @@ document.getElementById('presetFile').addEventListener('change', e => {
         zed.checked = !!d.zones.contour;
         document.getElementById('edgeColRow').classList.toggle('hidden', !zed.checked);
         if (d.zones.couleurContour) zEdgeCol.value = d.zones.couleurContour;
+      }
+      if (d.multi) {
+        mon.checked = !!d.multi.on;
+        mbody.classList.toggle('hidden', !mon.checked);
+        if (d.multi.seuil != null) { mThrIn.value = d.multi.seuil; mThrIn.dispatchEvent(new Event('input')); }
+        if (d.multi.planetes) d.multi.planetes.forEach((c, i) => {
+          if (!c) return;
+          if (c.a) document.getElementById('mp' + (i + 1) + 'a').value = c.a;
+          if (c.b) document.getElementById('mp' + (i + 1) + 'b').value = c.b;
+        });
       }
     } catch (err) { alert('Preset invalide.'); }
   });
