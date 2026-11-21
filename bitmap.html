@@ -26,6 +26,12 @@
          margin:12px 0 4px; }
   select, input[type=range]{ width:100%; background:#0d0d14; color:#e8e6f5; border:1px solid var(--line);
          padding:6px; font-family:inherit; font-size:12px; }
+  input[type=range]{ -webkit-appearance:none; appearance:none; height:8px; cursor:pointer; }
+  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none; width:16px; height:16px;
+           background:var(--violet); border:3px solid #0d0d14; cursor:grab; }
+  input[type=range]::-moz-range-thumb{ width:12px; height:12px; background:var(--violet);
+           border:2px solid #0d0d14; cursor:grab; }
+  input[type=range]:active::-webkit-slider-thumb{ cursor:grabbing; }
   input[type=color]{ width:100%; height:30px; background:#0d0d14; border:1px solid var(--line); padding:2px; }
   input[type=file]{ width:100%; font-size:12px; color:var(--muted); }
   input[type=number]{ width:100%; background:#0d0d14; color:#e8e6f5; border:1px solid var(--line);
@@ -147,6 +153,25 @@
     <label for="gamma">Gamma <span class="val" id="gav">1.00</span></label>
     <input type="range" id="gamma" min="0.5" max="2.2" step="0.05" value="1" />
 
+    <label for="fps">FPS de sortie <span class="val" id="fpsv">30</span></label>
+    <select id="fps">
+      <option value="12">12</option>
+      <option value="15">15</option>
+      <option value="24">24 (cinéma)</option>
+      <option value="30" selected>30</option>
+      <option value="60">60</option>
+    </select>
+
+    <label for="spd">Vitesse <span class="val" id="spdv">1.00×</span></label>
+    <select id="spd">
+      <option value="0.25">0.25× (ralenti)</option>
+      <option value="0.5">0.5× (ralenti)</option>
+      <option value="1" selected>1× (normale)</option>
+      <option value="1.5">1.5×</option>
+      <option value="2">2× (accéléré)</option>
+      <option value="4">4× (accéléré)</option>
+    </select>
+
     <label for="esc">Échelle d'export <span class="val" id="escv">×4</span></label>
     <select id="esc">
       <option value="1">×1 (pixels bruts)</option>
@@ -258,6 +283,30 @@ const escSel = document.getElementById('esc');
 escSel.addEventListener('change', () => {
   document.getElementById('escv').textContent = '×' + escSel.value;
 });
+
+/* ---------- fps de sortie + vitesse de lecture ---------- */
+const fpsSel = document.getElementById('fps'), spdSel = document.getElementById('spd');
+fpsSel.addEventListener('change', () => {
+  document.getElementById('fpsv').textContent = fpsSel.value;
+});
+spdSel.addEventListener('change', () => {
+  video.playbackRate = parseFloat(spdSel.value) || 1;
+  document.getElementById('spdv').textContent = parseFloat(spdSel.value).toFixed(2) + '×';
+});
+
+/* ---------- repair durée (webm sans metadata) + timeline ---------- */
+function repairDuration(){
+  if (!video.src) return;
+  if (video.duration && isFinite(video.duration)) return;
+  const fix = () => {
+    video.removeEventListener('timeupdate', fix);
+    video.currentTime = 0;
+    if (video.paused && !(recorder && recorder.state !== 'inactive')) video.play().catch(()=>{});
+  };
+  video.addEventListener('timeupdate', fix);
+  video.currentTime = 1e7;
+}
+video.addEventListener('loadedmetadata', repairDuration);
 
 /* ---------- deux zones : ciel / sujet (pur ajout, sans effet quand décoché) ---------- */
 const zos = document.getElementById('zonesOn'), zbody = document.getElementById('zonesBody');
@@ -374,8 +423,11 @@ const SPOTS = {
 /* ---------- traitement ---------- */
 const buf = document.createElement('canvas');
 const bctx = buf.getContext('2d', { willReadFrequently: true });
-/* canvas d'export : même image, agrandie en pixels nets pour une vidéo de qualité */
+/* canvas d'export : même image, agrandie en pixels nets pour une vidéo de qualité.
+   Attaché au DOM (hors écran) : Chrome gèle les flux de capture des canvas détachés. */
 const expCv = document.createElement('canvas');
+expCv.style.cssText = 'position:fixed;left:0;bottom:0;width:2px;height:1px;opacity:0.01;pointer-events:none;z-index:-1';
+document.body.appendChild(expCv);
 const ectx = expCv.getContext('2d');
 
 /* table de quantiles du spot (64x64) : couverture moyenne neutre, pour chaque forme */
@@ -498,10 +550,13 @@ play2.addEventListener('click', togglePlay);
 document.addEventListener('keydown', e => {
   if (e.code === 'Space' && video.src && e.target.tagName !== 'INPUT') { e.preventDefault(); togglePlay(); }
 });
-seek.addEventListener('input', () => { if (video.duration) video.currentTime = seek.value / 1000 * video.duration; });
+seek.addEventListener('input', () => {
+  if (video.duration && isFinite(video.duration))
+    video.currentTime = seek.value / 1000 * video.duration;
+});
 function fmt(t){ if (!isFinite(t)) t = 0; return Math.floor(t/60) + ':' + String(Math.floor(t%60)).padStart(2,'0'); }
 function updateTime(){
-  if (video.duration) {
+  if (video.duration && isFinite(video.duration)) {
     seek.value = Math.round(video.currentTime / video.duration * 1000);
     timeEl.textContent = fmt(video.currentTime) + ' / ' + fmt(video.duration);
   }
@@ -560,12 +615,25 @@ function startRecording(mime){
   if (recorder && recorder.state !== 'inactive') return;
   exportExt = mime.indexOf('mp4') !== -1 ? 'mp4' : 'webm';
   ensureAudio();
-  const stream = expCv.captureStream(30);
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(()=>{});
+  const fps = parseInt(fpsSel.value, 10) || 30;
+  const stream = expCv.captureStream(fps);
   if (audioDest) audioDest.stream.getAudioTracks().forEach(t => stream.addTrack(t));
   chunks = [];
   const bits = Math.min(24000000, Math.max(6000000, expCv.width * expCv.height * 11));
   recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: bits });
   recorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+  const flush = setInterval(() => {
+    if (recorder && recorder.state === 'recording') { try { recorder.requestData(); } catch(e){} }
+    else clearInterval(flush);
+  }, 1000);
+  recorder.onerror = e => {
+    clearInterval(flush);
+    recIndicator.classList.remove('on');
+    recBtn.textContent = 'Enregistrer la vidéo';
+    dl.textContent = 'Erreur : ' + (e.error && e.error.name || 'inconnue');
+    dl.style.display = 'inline-block';
+  };
   recorder.onstop = () => {
     if (dl.href.startsWith('blob:')) URL.revokeObjectURL(dl.href);
     dl.href = URL.createObjectURL(new Blob(chunks, { type: mime }));
@@ -575,6 +643,7 @@ function startRecording(mime){
     dl.click();
     recIndicator.classList.remove('on');
     recBtn.textContent = 'Enregistrer la vidéo';
+    clearInterval(flush);
   };
   video.pause();
   video.loop = false;
@@ -610,7 +679,7 @@ document.getElementById('savePreset').addEventListener('click', () => {
     res: resSel.value, dither: dithSel.value,
     halftone: { lineature: lpiIn.value, angle: angIn.value, forme: shapeSel.value },
     palette: palSel.value, c1: c1.value, c2: c2.value, gamma: gamIn.value, boucle: looping,
-    echelle: escSel.value,
+    echelle: escSel.value, fps: fpsSel.value, vitesse: spdSel.value,
     zones: {
       on: zos.checked, sky: zSky.value, tol: tolIn.value,
       skyClaire: zSky1.value, skySombre: zSky2.value,
@@ -644,6 +713,8 @@ document.getElementById('presetFile').addEventListener('change', e => {
       if (d.gamma) { gamIn.value = d.gamma; gamIn.dispatchEvent(new Event('input')); }
       if (typeof d.boucle === 'boolean' && d.boucle !== looping) loopBtn.click();
       if (d.echelle) { escSel.value = d.echelle; escSel.dispatchEvent(new Event('change')); }
+      if (d.fps) { fpsSel.value = d.fps; fpsSel.dispatchEvent(new Event('change')); }
+      if (d.vitesse) { spdSel.value = d.vitesse; spdSel.dispatchEvent(new Event('change')); }
       if (d.zones) {
         setZones(!!d.zones.on);
         if (d.zones.sky) zSky.value = d.zones.sky;
@@ -660,8 +731,13 @@ document.getElementById('presetFile').addEventListener('change', e => {
   });
 });
 
-/* ---------- boucle de rendu ---------- */
-function loop() { process(); updateTime(); requestAnimationFrame(loop); }
+/* ---------- processing loop (limité par le fps de sortie) ---------- */
+let lastFrame = 0;
+function loop(ts) {
+  const target = 1000 / (parseInt(fpsSel.value, 10) || 30);
+  if (!lastFrame || ts - lastFrame >= target - 2) { lastFrame = ts; process(); updateTime(); }
+  requestAnimationFrame(loop);
+}
 requestAnimationFrame(loop);
 </script>
 </body>
